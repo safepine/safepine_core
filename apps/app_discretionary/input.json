@@ -1,0 +1,41 @@
+{
+  "initial_deposit_IN": 250000,
+  "asset_dates_IN": [
+    {"year": 2023, "month": 11, "day": 30},
+    {"year": 2023, "month": 12, "day": 7},
+    {"year": 2023, "month": 12, "day": 11},
+    {"year": 2023, "month": 12, "day": 19},
+    {"year": 2023, "month": 12, "day": 22},
+    {"year": 2024, "month": 1, "day": 12},
+    {"year": 2024, "month": 2, "day": 20},
+    {"year": 2024, "month": 3, "day": 15},
+    {"year": 2024, "month": 4, "day": 2},
+    {"year": 2024, "month": 4, "day": 4}
+  ],
+  "asset_names_IN": [
+    ["COIN", "BTC-USD", "SLV", "SLVM", "BIL"],
+    ["COIN", "BTC-USD", "BIL"],
+    ["BIL"],
+    ["COIN", "BTC-USD", "BIL"],
+    ["COIN", "BTC-USD", "PBR", "OXY", "BIL"],
+    ["PBR", "OXY", "BIL", "GC=F"],
+    ["PBR", "OXY", "BIL", "GC=F"],
+    ["PLTR", "PBR", "OXY", "BIL", "GC=F"],
+    ["PLTR", "PBR", "OXY", "GOLD", "BIL", "GC=F"],
+    ["PLTR", "PBR", "OXY", "GOLD", "BTC-USD", "BIL", "GC=F"]
+  ],
+  "asset_ratios_IN": [
+    [0.01, 0.027, 0.025, 0.01, 0.928],
+    [0.01, 0.03, 0.96],
+    [1.00],
+    [0.015, 0.025, 0.96],
+    [0.015, 0.025, 0.04, 0.04, 0.88],
+    [0.04, 0.04, 0.915, 0.005],
+    [0.04, 0.04, 0.9, 0.02],
+    [0.04, 0.04, 0.04, 0.86, 0.02],
+    [0.04, 0.04, 0.04, 0.04, 0.82, 0.02],
+    [0.04, 0.04, 0.04, 0.04, 0.04, 0.78, 0.02]
+  ],
+  "begin": {"year": 2023, "month": 11, "day": 25},
+  "end": {"year": 2024, "month": 4, "day": 20}
+}
