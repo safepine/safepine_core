@@ -2,11 +2,11 @@
 
 ## Safepine Core Open Source License
 
-### Version 1.1.0, [Jun 8, 2024]
+### Version 1.1.1, [Aug 4, 2024]
 
-**Grant of License:** Subject to the terms and conditions of this License, **Safepine** ("Licensor") hereby grants you a worldwide, royalty-free, non-exclusive license to use, copy, modify, and distribute the software known as **"Safepine Core" (the "Software") version 1.1.0** for personal and non-commercial purposes only.
+**Grant of License:** Subject to the terms and conditions of this License, **Safepine** ("Licensor") hereby grants you a worldwide, royalty-free, non-exclusive license to use, copy, modify, and distribute the software known as **"Safepine Core" (the "Software") version 1.1.1** for personal and non-commercial purposes only.
 
-**Bound to Software Release:** This license is bound to the specified release version of **Safepine Core v1.1.0**. Any subsequent releases may be subject to different license terms.
+**Bound to Software Release:** This license is bound to the specified release version of **Safepine Core v1.1.1**. Any subsequent releases may be subject to different license terms.
 
 **Third-Party License Compliance:** This Software includes components licensed under the MIT License (React.js, Plotly.js, and Bootstrap). You must comply with the terms of the MIT License for these components. The royalty fees specified in this license apply only to your use of Safepine Core and do not affect your obligations under the MIT License for any third-party components.
 

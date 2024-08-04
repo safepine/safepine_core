@@ -1,0 +1,28 @@
+name "safepine_core"
+description "Portfolio & asset simulation framework."
+authors "Safepine"
+copyright "Copyright © 2024, Safepine"
+license "proprietary"
+
+dependency "matplotlib-d" version="~>0.1.4"
+dependency "vibe-d" version="~>0.9.0"
+dependency "mysql-native" version="~>3.0.3"
+
+configuration "app_rebalance" {
+	sourcePaths "apps/app_rebalance" "modules" "modules/backend" "modules/quantum" "modules/math"
+	targetType "executable"
+	targetName "app_rebalance"
+}
+
+configuration "app_discretionary" {
+	sourcePaths "apps/app_discretionary" "modules" "modules/backend" "modules/quantum" "modules/math"
+	targetType "executable"
+	targetName "app_discretionary"
+}
+
+configuration "app_visuals" {
+	sourcePaths "apps/app_visuals"
+	targetType "executable"
+	targetName "app_visuals"
+	excludedSourceFiles "apps/app_visuals/Firebird.d"
+}
