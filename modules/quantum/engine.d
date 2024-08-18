@@ -156,6 +156,8 @@ Refresh_t Refresh(
   InitializeStash(initialDeposit_IN, startDate_IN);
   _initialDeposit = initialDeposit_IN;
   _tradeNumber = 0; // sets back trade list index to 0
+  _dataEndDetected = false;
+  _dataEndCounter = 0;
   return result;
 }
 
@@ -483,6 +485,97 @@ BuySell_t BuyImpl(string
   return BuySell_t.Success;
 }
 
+BuySell_t BuyImpl(string 
+  assetName_IN, 
+  double assetquantity_IN,
+  string connectionID_IN = "none") 
+{
+  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+
+  //Pre-Buy Checks
+  // Check: Negative input
+  if(assetquantity_IN < 0) {
+    return BuySell_t.Error_Negative;
+  }
+
+  // Check: Weekend
+  if(_currentDate.dayOfWeek == DayOfWeek.sat || _currentDate.dayOfWeek == DayOfWeek.sun) {
+    return BuySell_t.Error_Weekend;
+  }
+
+  // Check: Tick Name in Database
+  DataRow tickerData = TickAvailableAtDate(assetName_IN, connectionID_IN);
+  if(tickerData.isAvailable == TickAvailableAtDate_t.Error_TickNotFound) {
+    return BuySell_t.Error_TickNotFound;
+  } 
+
+  // Check: Whether tick exists at given date.
+  if(tickerData.isAvailable == TickAvailableAtDate_t.Error_TickNotAvailableAtDate) {
+    return BuySell_t.Error_TickNotAvailableAtDate;
+  }
+
+  // Check: Cash and make sure asset quantity is positive
+  ResultRange range = tickerData.data;
+  double asset_value = range.front[this._engineDataFormat.mysqlcloseindex].get!double;
+  double number_of_assets = assetquantity_IN;
+  double assetPrice = asset_value*number_of_assets;
+  double[2] cashAmount = _myStash.GetItemAtCurrentIndex("Cash");
+  if(cashAmount[1] != 1) {
+    return BuySell_t.Error_Stash;
+  }
+  if(cashAmount[0] < assetPrice || assetquantity_IN < 0) {
+    return BuySell_t.Error_TooPoor;
+  }
+
+  // Buy checks passed ...
+
+  // Decide whether tick name is in Portfolio
+  if(_myStash.CheckKey(assetName_IN) == _myStash.CheckKey_t.Fail) {
+    // Add asset if not in portfolio
+    _myStash.AddAsset(assetName_IN, Quantity_t.double_Q);
+
+    // Add asset name to internal string array too
+    _stashTickNames[_stashTickNamesIndex] = assetName_IN;
+    _stashTickNamesIndex += 1;
+  }
+
+  // Increase asset quantity.
+  _myStash.ModifyStash!double(assetquantity_IN, assetName_IN); 
+
+  // Decerease cash 
+  _myStash.ModifyStash!double(-assetPrice , "Cash");  
+
+  // Error on max allowed trades
+  if(_tradeNumber >= _maxTrades) return BuySell_t.Error_MaxTrades;
+
+  // Update trade list now that buy action is successful
+  Trade currentTrade;
+  currentTrade.tradeType = Trade_T.Buy;
+  currentTrade.assetName = assetName_IN;
+  currentTrade.assetQuantity = assetquantity_IN;
+  currentTrade.tradeDate = _currentDate.toISOExtString();
+  _engineTradeList[_tradeNumber] = currentTrade;
+  _tradeNumber++;
+
+  return BuySell_t.Success;
+}
+
+BuySell_t Buy(logger log = logger.on)(
+  string[] assetName_IN, 
+  double[] assetquantity_IN,
+  string connectionID_IN = "none") 
+{
+  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+
+  BuySell_t result;
+  if(assetName_IN.length != assetquantity_IN.length) return BuySell_t.Error_List; 
+  for(int i = 0; i<assetName_IN.length; ++i) {
+    result = BuyImpl(assetName_IN[i], assetquantity_IN[i], connectionID_IN);
+    if(log == logger.on) BuyLogger(result, assetName_IN[i]);
+  }
+  return result;
+} 
+
 /***********************************
  * Summary: Logs to console the outcome of buy
  * Params:
@@ -650,6 +743,94 @@ BuySell_t SellImpl(
   return BuySell_t.Success;   
 }
 
+BuySell_t Sell(logger log = logger.on)(
+  string[] assetName_IN, 
+  double[] assetquantity_IN,
+  string connectionID_IN = "none") 
+{
+  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+
+  BuySell_t result;
+  if(assetName_IN.length != assetquantity_IN.length) 
+    return BuySell_t.Error_List; 
+  for(int i = 0; i<assetName_IN.length; ++i) {
+    result = SellImpl(
+      assetName_IN[i],
+      assetquantity_IN[i],
+      connectionID_IN);
+    if(log == logger.on) 
+      SellLogger(result, assetName_IN[i]);
+  }
+  return result;
+}
+
+BuySell_t SellImpl(
+  string assetName_IN, 
+  double assetquantity_IN,
+  string connectionID_IN = "none") 
+{
+  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+
+  // Check: Negative input
+  if(assetquantity_IN < 0) {
+    return BuySell_t.Error_Negative;
+  }
+
+  // Check: Weekend
+  if(_currentDate.dayOfWeek == DayOfWeek.sat || _currentDate.dayOfWeek == DayOfWeek.sun) {
+    return BuySell_t.Error_Weekend;
+  }
+
+  // Check: Decide whether tick name is in the stash
+  if(_myStash.CheckKey(assetName_IN) == _myStash.CheckKey_t.Fail) { 
+    return BuySell_t.Error_TickNotFound;
+  } 
+
+  // Check: If asset quantity in the stash is larger than zero.
+  double[2] assetQuantity = _myStash.GetItemAtCurrentIndex(assetName_IN);
+  if(assetQuantity[1] != 1) {
+    return BuySell_t.Error_Stash;
+  }
+
+  if( ( assetQuantity[0] -  assetquantity_IN ) < 0) {
+    return BuySell_t.Error_TooPoor;
+  }
+
+  // Sell checks passed.
+  DataRow tickerData = TickAvailableAtDate(assetName_IN, connectionID_IN);
+
+  ResultRange range = tickerData.data;
+  
+  // Check: Whether tick exists at given date.
+  if(tickerData.isAvailable == TickAvailableAtDate_t.Error_TickNotAvailableAtDate) {
+    return BuySell_t.Error_TickNotAvailableAtDate;
+  }
+
+  double asset_value = range.front[this._engineDataFormat.mysqlcloseindex].get!double;
+  double number_of_assets = to!double(assetquantity_IN);
+  double assetPrice = asset_value*number_of_assets;
+
+  // Increase asset quantity.
+  _myStash.ModifyStash!double(-assetquantity_IN, assetName_IN);  
+
+  // Decerease cash 
+  _myStash.ModifyStash!double(assetPrice , "Cash"); 
+
+  // Error on max allowed trades
+  if(_tradeNumber >= _maxTrades) return BuySell_t.Error_MaxTrades;
+
+  // Update trade list now that sell action is successful
+  Trade currentTrade;
+  currentTrade.tradeType = Trade_T.Sell;
+  currentTrade.assetName = assetName_IN;
+  currentTrade.assetQuantity = assetquantity_IN;
+  currentTrade.tradeDate = _currentDate.toISOExtString();
+  _engineTradeList[_tradeNumber] = currentTrade;
+  _tradeNumber++;
+
+  return BuySell_t.Success;   
+}
+
 /***********************************
  * Summary: Logs to console the outcome of sell
  * Params:
@@ -780,6 +961,7 @@ IncrementDate_t IncrementDate(string connectionID_IN = "none")
           // Verify we have more than zero of that asset
           if(assetQuantity[0] > 0) {  
             writeln("End of data feed detected! Symbol: "~key);
+            _dataEndDetected = true;
             // Automatically sell it at the last day.
             // Potential bug if table and meta table last days do not match.
             assert(Sell([key], [to!int(assetQuantity[0])], connectionID_IN)== BuySell_t.Success);
@@ -791,6 +973,13 @@ IncrementDate_t IncrementDate(string connectionID_IN = "none")
         _myStash.ModifyStash!double(0 , "Dividend");  
       }
     }
+  }
+
+  // Pie charts gets the last update on data end
+  // Time series charts start printing without
+  // the missing data.
+  if(_dataEndDetected) {
+    ++_dataEndCounter;
   }
 
   // Add new date to the array. As long as stash tick starts from zero
@@ -913,47 +1102,6 @@ Trade[] ImportTrades(string name_IN) {
     tradeList ~= tradeToImport;
   }
   return tradeList;
-}
-
-/***********************************
- * Summary: A function to read a json file and save 
- * portfolio allocations. Function will return an empty
- * profile struct if json array lengths are not same.
- * Params:
- *      name_IN = Name of the input file
- * Returns:
- *    
- */
-AssetAllocationProfile ImportAssetAllocationProfile(string name_IN) 
-{
-  string raw = to!string(read(name_IN));
-  AssetAllocationProfile profile;
-  JSONValue profile_json = parseJSON(raw);
-  if(profile_json["asset_dates_IN"].array.length == profile_json["asset_names_IN"].array.length && profile_json["asset_ratios_IN"].array.length == profile_json["asset_dates_IN"].array.length)
-  {
-    ulong profile_length = profile_json["asset_dates_IN"].array.length;
-    profile.initialDeposit = to!double(to!string(profile_json["initial_deposit_IN"]));
-    profile.dataBegin = Date(to!int(to!string(profile_json["begin"]["year"])), to!int(to!string(profile_json["begin"]["month"])), to!int(to!string(profile_json["begin"]["day"])));
-    profile.dataEnd = Date(to!int(to!string(profile_json["end"]["year"])), to!int(to!string(profile_json["end"]["month"])), to!int(to!string(profile_json["end"]["day"])));
-    for(ulong i = 0; i < profile_length; ++i)
-    {
-      profile.assetDates ~= Date(to!int(to!string(profile_json["asset_dates_IN"][i]["year"])), to!int(to!string(profile_json["asset_dates_IN"][i]["month"])), to!int(to!string(profile_json["asset_dates_IN"][i]["day"])));
-      string[] assetNames;
-      for(ulong k = 0; k < profile_json["asset_names_IN"][i].array.length; ++k)
-      {
-        string unfiltered_symbol = to!string(profile_json["asset_names_IN"][i][k]);
-        assetNames ~= unfiltered_symbol.replace("\"", "");
-      }
-      profile.assetNames ~= assetNames;
-      double[] assetRatio;
-      for(ulong k = 0; k < profile_json["asset_ratios_IN"][i].array.length; ++k)
-      {
-        assetRatio ~= to!double(to!string(profile_json["asset_ratios_IN"][i][k]));
-      }
-      profile.assetRatios ~= new Matrix(assetRatio);
-    }
-  }
-  return profile;
 }
 
 /***********************************
@@ -1626,6 +1774,7 @@ JSONValue PieChart_json(
     double[] asset_sizes;
     foreach(asset; _all_assets){
         int length = to!int(asset.valueArray.length);
+        length = length - _dataEndCounter;
         if(time_IN == "begin")
           length = 1;
         if(asset.valueArray[length-1] > 0.0) {
@@ -2131,6 +2280,12 @@ Trade[_maxTrades] _engineTradeList;
 /// Number of succesful trades in this engine instance
 int _tradeNumber = 0;
 
+// Number of days passed after the first End of data feed detection
+int _dataEndCounter = 0;
+
+// Triggered to True when data feed end is detected.
+bool _dataEndDetected = false;
+
 /// Index value to keep track of _stashTickNames
 int _stashTickNamesIndex; 
 
@@ -2238,16 +2393,6 @@ struct Trade {
   string assetName;
   double assetQuantity;
   string tradeDate;
-}
-
-/// Contains portfolio rebalance dates, symbols and percentages
-struct AssetAllocationProfile {
-  Matrix[] assetRatios;
-  string[][] assetNames;
-  Date[] assetDates;
-  double initialDeposit;
-  Date dataBegin;
-  Date dataEnd;
 }
 
 /// Contains initial conditions of a portfolio

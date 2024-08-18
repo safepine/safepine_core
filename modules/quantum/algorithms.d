@@ -17,6 +17,7 @@ void Discretionary (
   string[][] asset_names_IN,
   Matrix[] asset_ratios_IN,
   Date[] asset_dates_IN,
+  string scheduleType_IN,
   string connectionID_IN = "none") 
 {
   import std.conv: to;
@@ -35,22 +36,38 @@ void Discretionary (
   {
     while(engine_IN.GetCurrentDate() < asset_dates_IN[asset_date_index]) 
       { engine_IN.IncrementDate(); }
-    engine_IN.SellEverything!(safepine_core.quantum.engine.logger.off);
-
-    double[] assets_prices_unit = engine_IN.GetPrice(
-      asset_names_IN[asset_date_index],
-      engine_IN.GetCurrentDate());
-    Matrix asset_prices_unit_m = new Matrix(assets_prices_unit);
-    Matrix portfolio_allocation = PortfolioAllocation!(safepine_core.math.optimization.logger.off)
-    (
-      asset_names_IN[asset_date_index], 
-      asset_ratios_IN[asset_date_index], 
-      asset_prices_unit_m, 
-      initial_deposit_IN
-    );   
-    engine_IN.Buy(
-      asset_names_IN[asset_date_index],
-      portfolio_allocation.toInt_v);
+    if(scheduleType_IN == "ratio") {
+      engine_IN.SellEverything!(safepine_core.quantum.engine.logger.off);
+      double[] assets_prices_unit = engine_IN.GetPrice(
+        asset_names_IN[asset_date_index],
+        engine_IN.GetCurrentDate());
+      Matrix asset_prices_unit_m = new Matrix(assets_prices_unit);
+      Matrix portfolio_allocation = PortfolioAllocation!(safepine_core.math.optimization.logger.off)
+      (
+        asset_names_IN[asset_date_index], 
+        asset_ratios_IN[asset_date_index], 
+        asset_prices_unit_m, 
+        initial_deposit_IN
+      );   
+      engine_IN.Buy(
+        asset_names_IN[asset_date_index],
+        portfolio_allocation.toInt_v);      
+    }
+    else if(scheduleType_IN == "units") {
+      for(ulong asset_index = 0; asset_index < asset_ratios_IN[asset_date_index].toInt_v.length; ++asset_index) {
+        if(asset_names_IN[asset_date_index][asset_index] == "CASH"){
+          engine_IN.Deposit(asset_ratios_IN[asset_date_index].toDouble_v[asset_index]);
+        }
+        else {
+          if(asset_ratios_IN[asset_date_index].toDouble_v[asset_index] > 0) {
+            engine_IN.Buy([asset_names_IN[asset_date_index][asset_index]], [asset_ratios_IN[asset_date_index].toDouble_v[asset_index]]);
+          }
+          else {
+            engine_IN.Sell([asset_names_IN[asset_date_index][asset_index]], [-asset_ratios_IN[asset_date_index].toDouble_v[asset_index]]);          
+          }
+        }
+      }
+    }
   }
 
   // Handles the delta between portfolio end date, and final date in the input list.

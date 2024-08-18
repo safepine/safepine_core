@@ -415,7 +415,6 @@ class sdf : mysqlhook {
       }
     }   
 
-    // Compatible with Quandl EoD and csv output from YahooFinanceD
     const string standard_meta_table_structure = 
       "(
       symbol VARCHAR(255) NOT NULL, 

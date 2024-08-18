@@ -23,14 +23,20 @@ void main()
   write(App("Discretionary Portfolio", "May 18, 2024"));
 
   // Initialize backend & engines
-  Engine Portfolio = new Engine();
-  Engine Benchmark = new Engine();
   AssetAllocationProfile input_profile;
-  input_profile = Portfolio.ImportAssetAllocationProfile("apps/app_discretionary/input.json");
+  // Replace the following input with "input_percentage.json" to run the algorithm
+  // over a percentage based schedule file.
+  input_profile = ImportAssetSchedule("config.json");
   string[] symbols = UniqueStrings(input_profile.assetNames);
   symbols ~= "SPY"; // For benchmarks.
-  DataAcquisition(symbols, input_profile.dataBegin, input_profile.dataEnd); // saves data under cache/all_data...
-  sdf backend = SetupSafepineCoreBackend("cache/all_data_"~input_profile.dataEnd.toISOString()~".csv");
+  DataAcquisition(
+    symbols, 
+    input_profile.dataBegin, 
+    input_profile.dataEnd,
+    input_profile.dataProvider); // saves data under cache/all_data...  
+  sdf backend = SetupSafepineCoreBackend("cache/all_data.csv");
+  Engine Portfolio = new Engine();
+  Engine Benchmark = new Engine();
 
   // Algorithms
   Discretionary(
@@ -40,7 +46,8 @@ void main()
     input_profile.dataEnd,
     input_profile.assetNames,
     input_profile.assetRatios,
-    input_profile.assetDates);
+    input_profile.assetDates,
+    input_profile.scheduleType);
   BuyAndHold(
     Benchmark,
     input_profile.initialDeposit,

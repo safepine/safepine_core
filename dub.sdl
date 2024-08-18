@@ -4,7 +4,6 @@ authors "Safepine"
 copyright "Copyright © 2024, Safepine"
 license "proprietary"
 
-dependency "matplotlib-d" version="~>0.1.4"
 dependency "vibe-d" version="~>0.9.0"
 dependency "mysql-native" version="~>3.0.3"
 
@@ -21,8 +20,26 @@ configuration "app_discretionary" {
 }
 
 configuration "app_visuals" {
-	sourcePaths "apps/app_visuals"
+	sourcePaths "apps/app_visuals" "modules" "modules/backend" "modules/quantum" "modules/math"
 	targetType "executable"
 	targetName "app_visuals"
 	excludedSourceFiles "apps/app_visuals/Firebird.d"
+}
+
+configuration "set_1" {
+	sourcePaths "tests/set_1" "tests/data" "modules" "modules/backend" "modules/quantum" "modules/math" 
+	targetType "executable"
+	targetName "test_set_1"
+}
+
+configuration "set_2" {
+	sourcePaths "tests/set_2" "tests/data" "modules" "modules/backend" "modules/quantum" "modules/math" 
+	targetType "executable"
+	targetName "test_set_2"
+}
+
+configuration "set_3" {
+	sourcePaths "tests/set_3" "tests/data" "modules" "modules/backend" "modules/quantum" "modules/math" 
+	targetType "executable"
+	targetName "test_set_3"
 }
