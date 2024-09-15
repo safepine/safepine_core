@@ -174,7 +174,7 @@ function RenderPage(charts_IN)
           key: "span_3",
           className:"fs-4",
         },
-        ["Safepine"
+        ["Safepine Core Desktop"
         ]),
       ]),
     React.createElement(

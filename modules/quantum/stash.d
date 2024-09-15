@@ -301,7 +301,9 @@ struct Stash {
 
     // Write to output file if input name is non-empty string.
     if(name_IN != "") {
-      std.file.write(name_IN~".csv", rawText);
+      if (!exists("out/"))
+        mkdir("out/");     
+      std.file.write("out/"~name_IN~".csv", rawText);
     }
 
     // Return raw text.

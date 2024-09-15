@@ -27,9 +27,50 @@ function chartTrace(dates_IN, price_IN, type_IN) {
   return [trace];
 }
 
-function chartLayout(dates_IN, revision_IN, color_IN = 'red', shapes_IN = []) {
+function chartLayout(
+  dates_IN, 
+  revision_IN, 
+  color_IN = 'red', 
+  shapes_IN = [],
+  arrowValues_IN = [],
+  arrowDates_IN = [],
+  arrowPrices_IN = []) 
+{
+  var annotation_array = [];
+  var annotation_color = "";
+  var annotation_direction = 0;
+
+  for(i = 0; i < arrowValues_IN.length; i++) {
+    if(arrowValues_IN[i] > 0) {
+      annotation_color = "green";
+      annotation_direction = 1;
+    }
+    else {
+      annotation_color = "red";
+      annotation_direction = -1;
+    }
+    var annotation = {
+      x: arrowDates_IN[i],
+      y: arrowPrices_IN[i],
+      text: arrowValues_IN[i],
+      textangle: 0,
+      ax: 0,
+      ay: annotation_direction*25,
+      font: {
+        color: "White",
+        size: 12
+      },
+      arrowcolor: annotation_color,
+      arrowsize: 1,
+      arrowwidth: 2,
+      arrowhead: 2
+    }
+    annotation_array.push(annotation);
+  }
+
   var layout = 
-  {         
+  {
+    annotations: annotation_array,
     margin: { l: 40, r: 40, b: 0, t: 40, pad: 0 },
     dragmode: "drawline",
     newshape: { line: {color: color_IN,}},
@@ -42,6 +83,39 @@ function chartLayout(dates_IN, revision_IN, color_IN = 'red', shapes_IN = []) {
     yaxis: { gridcolor: 'rgba(255,255,255,0.1)', tickfont: {color: 'rgba(255,255,255,1)',},}
   };
   return layout;
+}
+
+function chartSwings(dates_IN, price_IN, color_IN) {
+  var trace = {
+
+        x: dates_IN,
+        y: price_IN,
+        mode: 'markers',
+        name: 'Swings',
+        marker: {
+          color: color_IN,
+          size: 10
+        },
+        arrowcolor: "red",
+        arrowsize: 3,
+        arrowwidth: 1,
+        arrowhead: 1
+  };
+  return trace;
+}
+
+function chartFilter(dates_IN, price_IN) {
+  var trace = 
+  {
+    x: dates_IN,            
+    y: price_IN,         
+    type: 'scatter',
+    showlegend: false,
+    marker: {
+      color: 'rgb(30,144,255)',
+    }
+  };
+  return [trace];
 }
 
 /// Portfolio

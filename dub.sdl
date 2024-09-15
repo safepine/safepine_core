@@ -7,39 +7,19 @@ license "proprietary"
 dependency "vibe-d" version="~>0.9.0"
 dependency "mysql-native" version="~>3.0.3"
 
-configuration "app_rebalance" {
-	sourcePaths "apps/app_rebalance" "modules" "modules/backend" "modules/quantum" "modules/math"
-	targetType "executable"
-	targetName "app_rebalance"
+preBuildCommands `gcc -c -o sqlite3.o tools/dlang-sqlite-interface/sqlite3.c && ar rcs sqlite3.a sqlite3.o`
+lflags "sqlite3.a"
+sourceFiles "modules/backend/sqlite3d.c"
+sourcePaths "modules" "modules/backend" "modules/quantum" "modules/math"
+
+configuration "app_desktop" {
+    sourcePaths "app_desktop"
+    targetType "executable"
+    targetName "safepine_core_desktop"
 }
 
-configuration "app_discretionary" {
-	sourcePaths "apps/app_discretionary" "modules" "modules/backend" "modules/quantum" "modules/math"
-	targetType "executable"
-	targetName "app_discretionary"
-}
-
-configuration "app_visuals" {
-	sourcePaths "apps/app_visuals" "modules" "modules/backend" "modules/quantum" "modules/math"
-	targetType "executable"
-	targetName "app_visuals"
-	excludedSourceFiles "apps/app_visuals/Firebird.d"
-}
-
-configuration "set_1" {
-	sourcePaths "tests/set_1" "tests/data" "modules" "modules/backend" "modules/quantum" "modules/math" 
-	targetType "executable"
-	targetName "test_set_1"
-}
-
-configuration "set_2" {
-	sourcePaths "tests/set_2" "tests/data" "modules" "modules/backend" "modules/quantum" "modules/math" 
-	targetType "executable"
-	targetName "test_set_2"
-}
-
-configuration "set_3" {
-	sourcePaths "tests/set_3" "tests/data" "modules" "modules/backend" "modules/quantum" "modules/math" 
-	targetType "executable"
-	targetName "test_set_3"
+configuration "all" {
+    sourcePaths "tests/src" "tests/data" 
+    targetType "executable"
+    targetName "safepine_core_tests"
 }

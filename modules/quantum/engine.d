@@ -15,111 +15,52 @@ import std.string: indexOf;
 import std.typecons: tuple;
 
 // Safepine
-import safepine_core.quantum.stash;
-import safepine_core.backend.mysqlhook: mysqlhook, mysql_connection;
+import safepine_core.backend.sqlinterface;
 import safepine_core.math.matrix;
+import safepine_core.quantum.stash;
 
 // Third party
-import mysql: ResultRange; 
+import mysql; 
+
+/// Table definitions used in prices & pricesMeta tables
+const string priceTableName = "safepine_core_prices";
+const string metaTablename = "safepine_core_prices_meta";
+const int openIndex = 2;
+const int highIndex = 3;
+const int lowIndex = 4;
+const int closeIndex = 5;
+const int dividendIndex = 7;
+const int splitIndex = 8;
+const int metaSymbolIndex = 0;
+const int metaBeginIndex = 1;
+const int metaEndIndex = 2;
 
 /***********************************
  * Safepine's portfolio simulation class.
- * Feature_Request_1: Safepine Science integration
- * Feature_Request_2: Individual trade tracking system
+ * It provides a fast backtester 
+ * implementation along with various
+ * functions to access portfolio
+ * analytics
  */
-class Engine : mysqlhook {
+class Engine(driver T) : sqlinterface!(T) {
+public:
 /***********************************
- * Constructor: Constructs the engine templated
- * as SDF. Only SDF is supported at the moment
- * Params:
- *      connectionInformation_IN = mysql configuration
- *    engineDataFormat_IN = Price, meta tables and their format
+ * Constructor: Instantiate the 
+ * engine of Safepine Core. See
+ * below for further instructions.
   Example:
   -------------------
-  sdf_backend_1.DeleteUserTable("engine_user", "price_data");
-  sdf_backend_1.CreateUserTable("engine_user", "price_data");
-  sdf_backend_1.LoadUserData("engine_user", "price_data", "../_test_tables/quandl_small_test_data.csv", 0);
-
-  int result_1;
-  double initialDeposit_1 = 3000.0; // Make initial deposit and start the engine
-  Date  startDate_1 = Date(2016, 11, 11); // Select start date
-  auto myEngine_1 = new Engine(mysqlConnection, format); // Instantiate engine
-  myEngine_1.Refresh(initialDeposit_1, startDate_1); // need to call this!
-  myEngine_1.IncrementDate(); // Do some algorithmic actions
+  double initialDeposit_1 = 3000.0;
+  Date startDate_1 = Date(2016, 11, 11);
+  auto myEngine_1 = new Engine("tests/data/quandl_small_test_data.csv");
+  myEngine_1.Refresh(initialDeposit_1, startDate_1);
+  myEngine_1.IncrementDate();
   -------------------
  */
-this(data_format format = data_format.sdf)(
-  mysql_connection connectionInformation_IN, 
-  engine_data_format engineDataFormat_IN) 
+this(string dataPath) 
 {
-  if(format == data_format.sdf) {
-    _engineDataFormat.metatablename = engineDataFormat_IN.metatablename;
-    _engineDataFormat.pricetablename = engineDataFormat_IN.pricetablename;  
-    _engineDataFormat.datecolumn = "date";
-    _engineDataFormat.symbolcolumn = "symbol";
-    _engineDataFormat.mysqlopenindex = 2;
-    _engineDataFormat.mysqlhighindex = 3;
-    _engineDataFormat.mysqllowindex = 4;
-    _engineDataFormat.mysqlcloseindex = 5;
-    _engineDataFormat.mysqldividendindex = 7; 
-    _engineDataFormat.mysqlsplitindex = 8;
-    _engineDataFormat.metasymbolindex = 0;
-    _engineDataFormat.metabeginindex = 1;
-    _engineDataFormat.metaendindex = 2;
-  }
-
-  // Init mysql first
-  _connectionInformation = connectionInformation_IN;
-  _mainConnectionID = GenerateConnectionID();
-  InitializeMysql(
-    _connectionInformation,
-    _mainConnectionID); // from mysqlhook
-
-  // Call this AFTER mysql connection
+  InitializeSafepineCoreBackend(dataPath);
   InitializeMetaData();
-
-  // Final init step
-  _myStash = Stash(_maxAssets, _maxTicks); 
-}
-
-/***********************************
- * Constructor: Constructs the engine specifically for Safepine Core.
- */
-this(data_format format = data_format.sdf)() 
-{
-  if(format == data_format.sdf) {
-    _engineDataFormat.metatablename = "safepine_core_prices_meta";
-    _engineDataFormat.pricetablename = "safepine_core_prices";  
-    _engineDataFormat.datecolumn = "date";
-    _engineDataFormat.symbolcolumn = "symbol";
-    _engineDataFormat.mysqlopenindex = 2;
-    _engineDataFormat.mysqlhighindex = 3;
-    _engineDataFormat.mysqllowindex = 4;
-    _engineDataFormat.mysqlcloseindex = 5;
-    _engineDataFormat.mysqldividendindex = 7; 
-    _engineDataFormat.mysqlsplitindex = 8;
-    _engineDataFormat.metasymbolindex = 0;
-    _engineDataFormat.metabeginindex = 1;
-    _engineDataFormat.metaendindex = 2;
-  }
-
-  // Init mysql first
-  mysql_connection mysqlConnection;
-  mysqlConnection.host = "host=127.0.0.1;";
-  mysqlConnection.port = "port=3306;";
-  mysqlConnection.user = "user=root;";
-  mysqlConnection.databaseName = "safepine_database";
-
-  _connectionInformation = mysqlConnection;
-  _mainConnectionID = GenerateConnectionID();
-  InitializeMysql(
-    _connectionInformation,
-    _mainConnectionID); // from mysqlhook
-
-  // Call this AFTER mysql connection
-  InitializeMetaData();
-
-  // Final init step
   _myStash = Stash(_maxAssets, _maxTicks); 
 }
 
@@ -128,7 +69,7 @@ this(data_format format = data_format.sdf)()
  * engine construction. If startDate_IN is a weekend
  * engine starts in the next Monday.
  * Params:
- *      initialDeposit_IN = Value on start date  
+ *    initialDeposit_IN = Value on start date  
  *    startDate_IN = Format -> yyyy-mm-dd
  * Returns:
  *    Success: Bought the asset
@@ -162,31 +103,35 @@ Refresh_t Refresh(
 }
 
 /***********************************
- * Summary: Returns total number of tick from the engine and
- * available ticks at current date
- * Returns = available_assets
+ * Summary: Returns total number of symbols
+ * from the backend and available symbols 
+ * at current date from backend & engine
+ * Returns:
+ *    ulong[3]: Total number of symbols, 
+ *              symbols available today, 
+ *              symbols available today 
+ *              in the portfolio
+ * 
  */
 pure ulong[3] 
-NumberOfTicks() {
-  ulong total_numer_of_ticks = _totalTicks;
-  ulong todays_available_assets_meta = TodaysTickNamesFromMeta().length;
-  ulong todays_available_assets_engine = TodaysTickNamesFromEngine().length;
-  return [_totalTicks, todays_available_assets_meta, todays_available_assets_engine];
+NumberofSymbols() {
+  return [_totalTicks, SymbolsToday().length, SymbolsTodayPortfolio().length];
 }
 
 /***********************************
- * Summary: Returns all available tick names 
+ * Summary: Returns all available symbols 
  * for buy/sell between begin/end dates. 
- * This is a SLOW function because of hashtable access on runtime. 
+ * This is a SLOW function because of 
+ * hashtable access on runtime. 
  * Do not call it inside/with increment days.
  * Params:
- *      beginDate_IN = Begin date. Format -> yyyy-mm-dd
+ *    beginDate_IN = Begin date. Format -> yyyy-mm-dd
  *    endDate_IN = End date
- *  Returns:
+ * Returns:
  *    tickArray: Available tick names between dates
  */
 pure string[string] 
-TickNamesFromMeta(
+Symbols(
   string beginDate_IN, 
   string endDate_IN) 
 {
@@ -231,15 +176,33 @@ TickNamesFromMeta(
 }
 
 /***********************************
- * Summary: Get all tick names based on _currentDate value. 
- * Uses meta saved from database. 
- * This is a SLOW function because of hashtable access on runtime. 
- * Do not call it inside/with increment days.
+ * Summary: Returns names in stash as a string array
+ */ 
+pure string[] 
+SymbolsPortfolio() {
+  string[] result;
+  for(int i = 0; i<_stashTickNamesIndex ; i++) {
+    // Tick names in the engine are saved in a list with constant access time.
+    result ~= _stashTickNames[i];
+  }
+
+  return result;
+}
+
+/***********************************
+ * Summary: Get all tick names based 
+ * on _currentDate value. Uses meta 
+ * saved from database. This is a SLOW 
+ * function because of hashtable access 
+ * on runtime. Do not call it inside/with 
+ * increment days.
  * Returns:
- *    tickArray: Available tick names at today's value. Today is engine's current date.
+ *    tickArray: Available tick names 
+ *               at today's value. Today 
+ *               is engine's current date.
  */
 pure string[] 
-TodaysTickNamesFromMeta() {
+SymbolsToday() {
   // To be returned ...
   string[] tickArray;
 
@@ -247,7 +210,7 @@ TodaysTickNamesFromMeta() {
   foreach(key; _metaData.byKey()) {
     // Check if date has length. Some of them don't. Not sure why. Also skip first row.
     if(_metaData[key].beginDate.length > 0) {
-      if(TickDateRange(_metaData[key].beginDate, _metaData[key].endDate)) {
+      if(IsSymbolWithinDateRanges(_metaData[key].beginDate, _metaData[key].endDate)) {
         tickArray ~= _metaData[key].tickName;
       }
     }
@@ -258,13 +221,16 @@ TodaysTickNamesFromMeta() {
 } 
 
 /***********************************
- * Summary: Get tick names available from portfolio/engine 
- * based on current date value.
+ * Summary: Get tick names available 
+ * from portfolio/engine based on 
+ * current date value.
  * Returns:
- *    tickArray: Available tick names at today's value. Today is engine's current date.
+ *    tickArray: Available tick names 
+ *               at today's value. 
+ *               Today is engine's current date.
  */
 pure string[] 
-TodaysTickNamesFromEngine() {
+SymbolsTodayPortfolio() {
   // To be returned ...
   string[] tickArray;
 
@@ -275,7 +241,7 @@ TodaysTickNamesFromEngine() {
 
     // Check if date has length. Some of them don't. Not sure why. Also skip first row.
     if(_metaData[key].beginDate.length > 0) {
-      if(TickDateRange(_metaData[key].beginDate, _metaData[key].endDate)) {
+      if(IsSymbolWithinDateRanges(_metaData[key].beginDate, _metaData[key].endDate)) {
         tickArray ~= _metaData[key].tickName;
       }
     }
@@ -283,88 +249,45 @@ TodaysTickNamesFromEngine() {
 
   // Return result
   return tickArray;
-} 
-
-/***********************************
- * Summary: Utility function to check if the current date is between 
- * begin and end dates.
- * Params:
- *      beginDate_IN = Begin date. Format -> yyyy-mm-dd
- *    endDate_IN = End date
- * Returns:
- *    True within range and false if not
- */
-pure bool 
-TickDateRange(
-  string beginDate_IN, 
-  string endDate_IN) 
-{
-  // Add to array if engine's current date is between begin and end dates.
-  int year = to!int(beginDate_IN[0 .. 4]);
-  int month = to!int(beginDate_IN[5 .. 7]);
-  int day = to!int(beginDate_IN[8 .. 10]);
-  auto beginDate_dt = Date(year, month, day);
-
-  year = to!int(endDate_IN[0 .. 4]);
-  month = to!int(endDate_IN[5 .. 7]);
-  day = to!int(endDate_IN[8 .. 10]);
-  auto endDate_dt = Date(year, month, day);
-  if(_currentDate >= beginDate_dt && _currentDate < endDate_dt) {
-    return true;
-  }
-  else {
-    return false;
-  }
 }
 
 /***********************************
- * Summary: Check whether tick is available at current date from 
- * eod table. Not meta table. This is fast for a single tick check.
+ * Summary: Check whether tick is 
+ * available at current date from 
+ * prices table. Not meta table. 
+ * This is fast for a single tick check.
  * Params:
- *      assetName_IN = String
+ *    assetName_IN = String
  *    connectionID_IN = String
  * Returns:
  *    tickAvailable
  */
-DataRow TickAvailableAtDate(string assetName_IN, string connectionID_IN = "none") {
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+SymbolAvailableAtDate_t SymbolAvailableAtDate(
+  string assetName_IN, 
+  string connectionID_IN = "none") 
+{
+  if(connectionID_IN == "none") connectionID_IN = m_mainConnectionID;
+  if(assetName_IN !in _metaData)
+    return SymbolAvailableAtDate_t.Error_TickNotFound;
+  if(GetPrice(assetName_IN, CurrentDate(), closeIndex, connectionID_IN) < 0.0)
+    return SymbolAvailableAtDate_t.Error_TickNotAvailableAtDate;
+  return SymbolAvailableAtDate_t.Success;
+}
 
-  // Initialize return struct
-  DataRow dataRowResult;
-
-  // Check if tick exists in the meta table
-  if(assetName_IN !in _metaData) {
-    dataRowResult.isAvailable = TickAvailableAtDate_t.Error_TickNotFound;
-    return dataRowResult;
-  }     
-
-  // If tick does not exist in the eod table but exists in the meta table, 
-  // it's not available on the current date.
-  ResultRange range = MySQLQuery(
-    "select * from "~
-    this._engineDataFormat.pricetablename~
-    " where "~
-    this._engineDataFormat.symbolcolumn~
-    " = \"" ~ assetName_IN ~ "\" and "~
-    this._engineDataFormat.datecolumn~"= \"" ~
-    _currentDate.toISOExtString() ~ "\";", connectionID_IN);
-
-  if(range.empty) {
-    dataRowResult.isAvailable = TickAvailableAtDate_t.Error_TickNotAvailableAtDate;
-    return dataRowResult;
-  }
-
-  // Fill the data.
-  dataRowResult.data = range;
-  dataRowResult.isAvailable = TickAvailableAtDate_t.Success;
-
-  return dataRowResult;
+/***********************************
+ * Summary: Adds cash to the portfolio at the current date
+ * Params:
+ *    cashValue_IN = Cash value to be deposited
+ */
+void Deposit(double cashValue_IN) {
+  _myStash.ModifyStash!double(cashValue_IN, "Cash");
+  _myStash.ModifyStash!double(cashValue_IN, "Deposit");   
 }
 
 /***********************************
  * Summary: List based implementation of buy function.
  * Params:
- *      assetName_IN = Asset name list
+ *    assetName_IN = Asset name list
  *    assetquantity_IN = Quantityt list. Mus be same size
  *    connectionID_IN = String
  * as asset name list.
@@ -382,7 +305,7 @@ BuySell_t Buy(logger log = logger.on)(
   int[] assetquantity_IN,
   string connectionID_IN = "none") 
 {
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+  if(connectionID_IN == "none") connectionID_IN = m_mainConnectionID;
 
   BuySell_t result;
   if(assetName_IN.length != assetquantity_IN.length) return BuySell_t.Error_List; 
@@ -391,173 +314,6 @@ BuySell_t Buy(logger log = logger.on)(
     if(log == logger.on) BuyLogger(result, assetName_IN[i]);
   }
   return result;
-} 
-
-/***********************************
- * Summary: Buys n-many of the asset at the _currentDate.
- * Not a pure function because of mysql access.
- * Params:
- *    assetName_IN = Asset name as a string
- *    assetquantity_IN = Quantity of asset as integer
- *    connectionID_IN = String
- * Template: 
- *    log: Calls logger if templated with logger.on
- * Returns:
- *    Success: Bought the asset
- *    Error_Weekend: Can't buy on weekends
- *    Error_TickNotFound: Tick not found
- *    Error_TickNotAvailableAtDate: Tick found but does not exists on given date
- *    Error_Stash: Stash threw an error.
- *    Error_TooPoor: Not enough cash.
- */
-BuySell_t BuyImpl(string 
-  assetName_IN, 
-  int assetquantity_IN,
-  string connectionID_IN = "none") 
-{
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
-
-  //Pre-Buy Checks
-  // Check: Negative input
-  if(assetquantity_IN < 0) {
-    return BuySell_t.Error_Negative;
-  }
-
-  // Check: Weekend
-  if(_currentDate.dayOfWeek == DayOfWeek.sat || _currentDate.dayOfWeek == DayOfWeek.sun) {
-    return BuySell_t.Error_Weekend;
-  }
-
-  // Check: Tick Name in Database
-  DataRow tickerData = TickAvailableAtDate(assetName_IN, connectionID_IN);
-  if(tickerData.isAvailable == TickAvailableAtDate_t.Error_TickNotFound) {
-    return BuySell_t.Error_TickNotFound;
-  } 
-
-  // Check: Whether tick exists at given date.
-  if(tickerData.isAvailable == TickAvailableAtDate_t.Error_TickNotAvailableAtDate) {
-    return BuySell_t.Error_TickNotAvailableAtDate;
-  }
-
-  // Check: Cash and make sure asset quantity is positive
-  ResultRange range = tickerData.data;
-  double asset_value = range.front[this._engineDataFormat.mysqlcloseindex].get!double;
-  double number_of_assets = to!double(assetquantity_IN);
-  double assetPrice = asset_value*number_of_assets;
-  double[2] cashAmount = _myStash.GetItemAtCurrentIndex("Cash");
-  if(cashAmount[1] != 1) {
-    return BuySell_t.Error_Stash;
-  }
-  if(cashAmount[0] < assetPrice || assetquantity_IN < 0) {
-    return BuySell_t.Error_TooPoor;
-  }
-
-  // Buy checks passed ...
-
-  // Decide whether tick name is in Portfolio
-  if(_myStash.CheckKey(assetName_IN) == _myStash.CheckKey_t.Fail) {
-    // Add asset if not in portfolio
-    _myStash.AddAsset(assetName_IN, Quantity_t.integer_Q);
-
-    // Add asset name to internal string array too
-    _stashTickNames[_stashTickNamesIndex] = assetName_IN;
-    _stashTickNamesIndex += 1;
-  }
-
-  // Increase asset quantity.
-  _myStash.ModifyStash!int(assetquantity_IN, assetName_IN); 
-
-  // Decerease cash 
-  _myStash.ModifyStash!double(-assetPrice , "Cash");  
-
-  // Error on max allowed trades
-  if(_tradeNumber >= _maxTrades) return BuySell_t.Error_MaxTrades;
-
-  // Update trade list now that buy action is successful
-  Trade currentTrade;
-  currentTrade.tradeType = Trade_T.Buy;
-  currentTrade.assetName = assetName_IN;
-  currentTrade.assetQuantity = assetquantity_IN;
-  currentTrade.tradeDate = _currentDate.toISOExtString();
-  _engineTradeList[_tradeNumber] = currentTrade;
-  _tradeNumber++;
-
-  return BuySell_t.Success;
-}
-
-BuySell_t BuyImpl(string 
-  assetName_IN, 
-  double assetquantity_IN,
-  string connectionID_IN = "none") 
-{
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
-
-  //Pre-Buy Checks
-  // Check: Negative input
-  if(assetquantity_IN < 0) {
-    return BuySell_t.Error_Negative;
-  }
-
-  // Check: Weekend
-  if(_currentDate.dayOfWeek == DayOfWeek.sat || _currentDate.dayOfWeek == DayOfWeek.sun) {
-    return BuySell_t.Error_Weekend;
-  }
-
-  // Check: Tick Name in Database
-  DataRow tickerData = TickAvailableAtDate(assetName_IN, connectionID_IN);
-  if(tickerData.isAvailable == TickAvailableAtDate_t.Error_TickNotFound) {
-    return BuySell_t.Error_TickNotFound;
-  } 
-
-  // Check: Whether tick exists at given date.
-  if(tickerData.isAvailable == TickAvailableAtDate_t.Error_TickNotAvailableAtDate) {
-    return BuySell_t.Error_TickNotAvailableAtDate;
-  }
-
-  // Check: Cash and make sure asset quantity is positive
-  ResultRange range = tickerData.data;
-  double asset_value = range.front[this._engineDataFormat.mysqlcloseindex].get!double;
-  double number_of_assets = assetquantity_IN;
-  double assetPrice = asset_value*number_of_assets;
-  double[2] cashAmount = _myStash.GetItemAtCurrentIndex("Cash");
-  if(cashAmount[1] != 1) {
-    return BuySell_t.Error_Stash;
-  }
-  if(cashAmount[0] < assetPrice || assetquantity_IN < 0) {
-    return BuySell_t.Error_TooPoor;
-  }
-
-  // Buy checks passed ...
-
-  // Decide whether tick name is in Portfolio
-  if(_myStash.CheckKey(assetName_IN) == _myStash.CheckKey_t.Fail) {
-    // Add asset if not in portfolio
-    _myStash.AddAsset(assetName_IN, Quantity_t.double_Q);
-
-    // Add asset name to internal string array too
-    _stashTickNames[_stashTickNamesIndex] = assetName_IN;
-    _stashTickNamesIndex += 1;
-  }
-
-  // Increase asset quantity.
-  _myStash.ModifyStash!double(assetquantity_IN, assetName_IN); 
-
-  // Decerease cash 
-  _myStash.ModifyStash!double(-assetPrice , "Cash");  
-
-  // Error on max allowed trades
-  if(_tradeNumber >= _maxTrades) return BuySell_t.Error_MaxTrades;
-
-  // Update trade list now that buy action is successful
-  Trade currentTrade;
-  currentTrade.tradeType = Trade_T.Buy;
-  currentTrade.assetName = assetName_IN;
-  currentTrade.assetQuantity = assetquantity_IN;
-  currentTrade.tradeDate = _currentDate.toISOExtString();
-  _engineTradeList[_tradeNumber] = currentTrade;
-  _tradeNumber++;
-
-  return BuySell_t.Success;
 }
 
 BuySell_t Buy(logger log = logger.on)(
@@ -565,7 +321,7 @@ BuySell_t Buy(logger log = logger.on)(
   double[] assetquantity_IN,
   string connectionID_IN = "none") 
 {
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+  if(connectionID_IN == "none") connectionID_IN = m_mainConnectionID;
 
   BuySell_t result;
   if(assetName_IN.length != assetquantity_IN.length) return BuySell_t.Error_List; 
@@ -579,7 +335,7 @@ BuySell_t Buy(logger log = logger.on)(
 /***********************************
  * Summary: Logs to console the outcome of buy
  * Params:
- *      result_IN = Result of the buy action
+ *    result_IN = Result of the buy action
  *    assetName_IN = Name of the asset
  */
 void BuyLogger(
@@ -588,44 +344,21 @@ void BuyLogger(
 {
   string msg_fail = 
   "Buy "~assetName_IN~
-  " failed at "~to!string(GetCurrentDate())~
+  " failed at "~to!string(CurrentDate())~
   " due to "~to!string(result_IN);
 
   string msg_success = 
   "Buy "~assetName_IN~
-  " successful at "~to!string(GetCurrentDate());  
+  " successful at "~to!string(CurrentDate());  
 
   if(result_IN != BuySell_t.Success) {writeln(msg_fail);}
   else if (result_IN == BuySell_t.Success) {writeln(msg_success);}
 }
 
 /***********************************
- * Summary: Sells everything inside the portfolio
- * Template: 
- *    log: Calls logger if templated with logger.on
- * Params:
- *    connectionID_IN = String
- * Returns:
- *    Check out buy/sell type enum definition
- */
-BuySell_t SellEverything(logger log = logger.on)(string connectionID_IN = "none") {
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
-  
-  BuySell_t result = BuySell_t.Success;
-  BuySell_t single_sell_result = BuySell_t.Success;
-
-  string[] names = GetNames();
-  for(int i = 0; i<names.length; ++i) {
-    single_sell_result = Sell!(log)([names[i]], [Get(names[i])]);
-    if(single_sell_result != BuySell_t.Success) result = BuySell_t.Error_SellEverything;
-  }
-  return result;
-} 
-
-/***********************************
  * Summary: List based implementation of sell function.
  * Params:
- *      assetName_IN = Asset name list
+ *    assetName_IN = Asset name list
  *    assetquantity_IN = Quantityt list. Mus be same size
  *    connectionID_IN = String
  * as asset name list.
@@ -643,7 +376,7 @@ BuySell_t Sell(logger log = logger.on)(
   int[] assetquantity_IN,
   string connectionID_IN = "none") 
 {
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+  if(connectionID_IN == "none") connectionID_IN = m_mainConnectionID;
 
   BuySell_t result;
   if(assetName_IN.length != assetquantity_IN.length) 
@@ -657,90 +390,6 @@ BuySell_t Sell(logger log = logger.on)(
       SellLogger(result, assetName_IN[i]);
   }
   return result;
-}   
-
-/***********************************
- * Summary: Sells n-many of the asset at the _currentDate.
- * Not a pure function because of mysql access.
- * Params:
- *    assetName_IN = Asset name as a string
- *    assetquantity_IN = Quantity of asset as integer
- *    connectionID_IN = String
- * Template: 
- *    log: Calls logger if templated with logger.on
- * Returns:
- *    Success: Asset sold
- *    Error_Weekend: Can't sell on weekends
- *    Error_TickNotFound: Tick not found in the engine's stash
- *    Error_TickNotAvailableAtDate: Tick found but does not exists on given date
- *    Error_Stash: Stash threw an error.
- *    Error_TooPoor: Can't sell more than what we have
- */
-BuySell_t SellImpl(
-  string assetName_IN, 
-  int assetquantity_IN,
-  string connectionID_IN = "none") 
-{
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
-
-  // Check: Negative input
-  if(assetquantity_IN < 0) {
-    return BuySell_t.Error_Negative;
-  }
-
-  // Check: Weekend
-  if(_currentDate.dayOfWeek == DayOfWeek.sat || _currentDate.dayOfWeek == DayOfWeek.sun) {
-    return BuySell_t.Error_Weekend;
-  }
-
-  // Check: Decide whether tick name is in the stash
-  if(_myStash.CheckKey(assetName_IN) == _myStash.CheckKey_t.Fail) { 
-    return BuySell_t.Error_TickNotFound;
-  } 
-
-  // Check: If asset quantity in the stash is larger than zero.
-  double[2] assetQuantity = _myStash.GetItemAtCurrentIndex(assetName_IN);
-  if(assetQuantity[1] != 1) {
-    return BuySell_t.Error_Stash;
-  }
-
-  if( ( assetQuantity[0] -  assetquantity_IN ) < 0) {
-    return BuySell_t.Error_TooPoor;
-  }
-
-  // Sell checks passed.
-  DataRow tickerData = TickAvailableAtDate(assetName_IN, connectionID_IN);
-
-  ResultRange range = tickerData.data;
-  
-  // Check: Whether tick exists at given date.
-  if(tickerData.isAvailable == TickAvailableAtDate_t.Error_TickNotAvailableAtDate) {
-    return BuySell_t.Error_TickNotAvailableAtDate;
-  }
-
-  double asset_value = range.front[this._engineDataFormat.mysqlcloseindex].get!double;
-  double number_of_assets = to!double(assetquantity_IN);
-  double assetPrice = asset_value*number_of_assets;
-
-  // Increase asset quantity.
-  _myStash.ModifyStash!int(-assetquantity_IN, assetName_IN);  
-
-  // Decerease cash 
-  _myStash.ModifyStash!double(assetPrice , "Cash"); 
-
-  // Error on max allowed trades
-  if(_tradeNumber >= _maxTrades) return BuySell_t.Error_MaxTrades;
-
-  // Update trade list now that sell action is successful
-  Trade currentTrade;
-  currentTrade.tradeType = Trade_T.Sell;
-  currentTrade.assetName = assetName_IN;
-  currentTrade.assetQuantity = assetquantity_IN;
-  currentTrade.tradeDate = _currentDate.toISOExtString();
-  _engineTradeList[_tradeNumber] = currentTrade;
-  _tradeNumber++;
-
-  return BuySell_t.Success;   
 }
 
 BuySell_t Sell(logger log = logger.on)(
@@ -748,7 +397,7 @@ BuySell_t Sell(logger log = logger.on)(
   double[] assetquantity_IN,
   string connectionID_IN = "none") 
 {
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+  if(connectionID_IN == "none") connectionID_IN = m_mainConnectionID;
 
   BuySell_t result;
   if(assetName_IN.length != assetquantity_IN.length) 
@@ -764,102 +413,48 @@ BuySell_t Sell(logger log = logger.on)(
   return result;
 }
 
-BuySell_t SellImpl(
-  string assetName_IN, 
-  double assetquantity_IN,
-  string connectionID_IN = "none") 
-{
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
-
-  // Check: Negative input
-  if(assetquantity_IN < 0) {
-    return BuySell_t.Error_Negative;
-  }
-
-  // Check: Weekend
-  if(_currentDate.dayOfWeek == DayOfWeek.sat || _currentDate.dayOfWeek == DayOfWeek.sun) {
-    return BuySell_t.Error_Weekend;
-  }
-
-  // Check: Decide whether tick name is in the stash
-  if(_myStash.CheckKey(assetName_IN) == _myStash.CheckKey_t.Fail) { 
-    return BuySell_t.Error_TickNotFound;
-  } 
-
-  // Check: If asset quantity in the stash is larger than zero.
-  double[2] assetQuantity = _myStash.GetItemAtCurrentIndex(assetName_IN);
-  if(assetQuantity[1] != 1) {
-    return BuySell_t.Error_Stash;
-  }
-
-  if( ( assetQuantity[0] -  assetquantity_IN ) < 0) {
-    return BuySell_t.Error_TooPoor;
-  }
-
-  // Sell checks passed.
-  DataRow tickerData = TickAvailableAtDate(assetName_IN, connectionID_IN);
-
-  ResultRange range = tickerData.data;
-  
-  // Check: Whether tick exists at given date.
-  if(tickerData.isAvailable == TickAvailableAtDate_t.Error_TickNotAvailableAtDate) {
-    return BuySell_t.Error_TickNotAvailableAtDate;
-  }
-
-  double asset_value = range.front[this._engineDataFormat.mysqlcloseindex].get!double;
-  double number_of_assets = to!double(assetquantity_IN);
-  double assetPrice = asset_value*number_of_assets;
-
-  // Increase asset quantity.
-  _myStash.ModifyStash!double(-assetquantity_IN, assetName_IN);  
-
-  // Decerease cash 
-  _myStash.ModifyStash!double(assetPrice , "Cash"); 
-
-  // Error on max allowed trades
-  if(_tradeNumber >= _maxTrades) return BuySell_t.Error_MaxTrades;
-
-  // Update trade list now that sell action is successful
-  Trade currentTrade;
-  currentTrade.tradeType = Trade_T.Sell;
-  currentTrade.assetName = assetName_IN;
-  currentTrade.assetQuantity = assetquantity_IN;
-  currentTrade.tradeDate = _currentDate.toISOExtString();
-  _engineTradeList[_tradeNumber] = currentTrade;
-  _tradeNumber++;
-
-  return BuySell_t.Success;   
-}
-
 /***********************************
  * Summary: Logs to console the outcome of sell
  * Params:
- *      result_IN = Result of the sell action
+ *    result_IN = Result of the sell action
  *    assetName_IN = Name of the asset
  */
 void SellLogger(BuySell_t result_IN, string assetName_IN) {
   string msg_fail = 
   "Sell "~assetName_IN~
-  " failed at "~to!string(GetCurrentDate())~
+  " failed at "~to!string(CurrentDate())~
   " due to "~to!string(result_IN);
 
   string msg_success = 
   "Sell "~assetName_IN~
-  " successful at "~to!string(GetCurrentDate());  
+  " successful at "~to!string(CurrentDate());  
 
   if(result_IN != BuySell_t.Success) {writeln(msg_fail);}
   else if (result_IN == BuySell_t.Success) {writeln(msg_success);}
 }
 
 /***********************************
- * Summary: Adds cash to the portfolio at the current date
+ * Summary: Sells everything inside the portfolio
+ * Template: 
+ *    log: Calls logger if templated with logger.on
  * Params:
- *      cashValue_IN = Cash value to be deposited
+ *    connectionID_IN = String
+ * Returns:
+ *    Check out buy/sell type enum definition
  */
-void Deposit(double cashValue_IN) {
-  _myStash.ModifyStash!double(cashValue_IN, "Cash");
-  _myStash.ModifyStash!double(cashValue_IN, "Deposit");   
-}
+BuySell_t SellEverything(logger log = logger.on)(string connectionID_IN = "none") {
+  if(connectionID_IN == "none") connectionID_IN = m_mainConnectionID;
+  
+  BuySell_t result = BuySell_t.Success;
+  BuySell_t single_sell_result = BuySell_t.Success;
+
+  string[] names = SymbolsPortfolio();
+  for(int i = 0; i<names.length; ++i) {
+    single_sell_result = Sell!(log)([names[i]], [Get(names[i])]);
+    if(single_sell_result != BuySell_t.Success) result = BuySell_t.Error_SellEverything;
+  }
+  return result;
+} 
 
 /***********************************
  * Summary: Updates tick for stash and date for engine. It skips weekends.
@@ -873,7 +468,7 @@ void Deposit(double cashValue_IN) {
  */
 IncrementDate_t IncrementDate(string connectionID_IN = "none")
 {
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+  if(connectionID_IN == "none") connectionID_IN = m_mainConnectionID;
   _dirty = true;
 
   // Check: Stash overflow
@@ -907,25 +502,19 @@ IncrementDate_t IncrementDate(string connectionID_IN = "none")
   string[] assetNames_Local = _myStash.GetAssetNames();
   foreach (string key; assetNames_Local) {
     if (key != "Cash") {
-      ResultRange range = MySQLQuery(
-        "select * from "~this._engineDataFormat.pricetablename~
-        " where "~this._engineDataFormat.symbolcolumn~" = \"" ~ key ~ 
-        "\" and "~this._engineDataFormat.datecolumn~"= \"" ~ 
-        _currentDate.toISOExtString() ~ "\";", connectionID_IN);
-
       // Check if tick exists at the current date. 
       // Holidays like 2016-Nov-24 thanksgiving don't exist.
-      if(!range.empty) {
+      if(GetPrice(key, CurrentDate(), closeIndex, connectionID_IN) > 0) {
         double assetDividend; 
-        if(this._engineDataFormat.mysqldividendindex == -1) {
+        if(dividendIndex == -1) {
           assetDividend = 0; 
         }
         else {
-          assetDividend = range.front[this._engineDataFormat.mysqldividendindex].get!double;
+          assetDividend = GetPrice(key, CurrentDate(), dividendIndex, connectionID_IN);
         }
         double assetSplit;
-        if(this._engineDataFormat.mysqlsplitindex != -1) {
-          assetSplit = range.front[this._engineDataFormat.mysqlsplitindex].get!double;
+        if(splitIndex != -1) {
+          assetSplit = GetPrice(key, CurrentDate(), splitIndex, connectionID_IN);
         }
         else assetSplit = 1;    
         double[2] assetAmount = _myStash.GetItemAtCurrentIndex(key);
@@ -995,7 +584,7 @@ IncrementDate_t IncrementDate(string connectionID_IN = "none")
  * You can buy/sell at target date and then increment
  * day again.
  * Params:
- *      targetDate_IN = In date format
+ *    targetDate_IN = In date format
  *    connectionID_IN = String
  * Returns:
  *    Success: Engine date incremented to target date.
@@ -1005,7 +594,7 @@ Increment2Date_t Increment2Date(
   Date targetDate_IN, 
   string connectionID_IN = "none") 
 {
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+  if(connectionID_IN == "none") connectionID_IN = m_mainConnectionID;
 
   // Check: If target date is older than current date this function returns -1.
   if(targetDate_IN < _currentDate) {
@@ -1026,7 +615,7 @@ Increment2Date_t Increment2Date(
  * You can buy/sell at target date and then increment
  * day again.
  * Params:
- *      year_IN = integer. For example, 2016
+ *    year_IN = integer. For example, 2016
  *    month_IN = integer [0-12]
  *    day_IN = integer [0-31]
  *    connectionID_IN = String
@@ -1040,131 +629,15 @@ Increment2Date_t Increment2Date(
   int day_IN,
   string connectionID_IN = "none") 
 {
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+  if(connectionID_IN == "none") connectionID_IN = m_mainConnectionID;
   return Increment2Date(Date(year_IN, month_IN, day_IN), connectionID_IN);
-} 
-
-/***********************************
- * Summary: 
- * Params:
- * 
- * Returns:
- *    Success: Json file eport as raw string.
- *    
- */ 
-string ExportTrades() {
-  JSONValue trade_json;
-  trade_json["start"] = JSONValue(_startDate.toISOExtString);
-  trade_json["deposit"] = JSONValue(_initialDeposit);
-  trade_json["name"] = JSONValue([_engineTradeList[0].assetName]);
-  trade_json["quantity"] = JSONValue([_engineTradeList[0].assetQuantity]);
-  trade_json["date"] = JSONValue([_engineTradeList[0].tradeDate]);
-  if(_engineTradeList[0].tradeType == Trade_T.Buy) 
-    trade_json["type"] = JSONValue(["Buy"]);
-  else if(_engineTradeList[0].tradeType == Trade_T.Sell) 
-    trade_json["type"] = JSONValue(["Sell"]);
-  for (int i = 1; i<_tradeNumber; ++i) {
-    trade_json["name"].array ~= JSONValue(_engineTradeList[i].assetName);
-    trade_json["quantity"].array ~= JSONValue(_engineTradeList[i].assetQuantity);
-    trade_json["date"].array ~= JSONValue(_engineTradeList[i].tradeDate);
-    if(_engineTradeList[i].tradeType == Trade_T.Buy) 
-      trade_json["type"].array ~= JSONValue("Buy");
-    else if(_engineTradeList[i].tradeType == Trade_T.Sell) 
-      trade_json["type"].array ~= JSONValue("Sell");
-  }
-  return trade_json.toPrettyString;
-}
-
-/***********************************
- * Summary: A function to read a json file save its trade 
- * contents to the trade array.
- * Params:
- *      name_IN = Name of the input file
- * Returns:
- *    
- */ 
-Trade[] ImportTrades(string name_IN) {
-  string raw = to!string(read(name_IN));
-  Trade[] tradeList;
-  JSONValue trade_json = parseJSON(raw);
-  uint trade_json_length = cast(uint)trade_json["name"].array.length;
-  for(uint i = 0; i<trade_json_length; ++i) {
-    Trade tradeToImport;
-    tradeToImport.assetName = to!string(trade_json["name"][i]);
-    tradeToImport.assetQuantity = 
-      to!double(
-        to!string(trade_json["quantity"][i]));
-    tradeToImport.tradeDate = to!string(trade_json["date"][i]);
-    if(to!string(trade_json["type"][i]) == "\"Buy\"") 
-      tradeToImport.tradeType = Trade_T.Buy;
-    else if(to!string(trade_json["type"][i]) == "\"Sell\"") 
-      tradeToImport.tradeType = Trade_T.Sell;
-    tradeList ~= tradeToImport;
-  }
-  return tradeList;
-}
-
-/***********************************
- * Summary: A function to read a json file and save its initial conditions
- * Params:
- *      name_IN = Name of the input file
- * Returns:
- *    
- */ 
-InitialCondition ImportInitialCondition(string name_IN) {
-  InitialCondition result;
-  string raw = to!string(read(name_IN));
-  JSONValue trade_json = parseJSON(raw);
-  result.startDate = to!string(trade_json["start"]);
-  result.initialDeposit = to!double(to!string(trade_json["deposit"]));
-  return result;
-}
-
-/***********************************
- * Summary: Executes a given trade list
- * Params:
- *      tradeList_IN = List with each element as Trade struct
- *    connectionID_IN = String
- * Returns:
- *    
- */ 
-void TradeExecutor(
-  Trade[] tradeList_IN,
-  string connectionID_IN = "none") 
-{
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
-  for(uint i = 0; i<tradeList_IN.length; ++i) {
-    if(tradeList_IN[i].tradeDate.length == 0) break;
-      string tradeDate = tradeList_IN[i].tradeDate;
-      int year = to!int(tradeDate[1 .. 5]);
-      int month = to!int(tradeDate[6 .. 8]);
-      int day = to!int(tradeDate[9 .. 11]);
-      ulong assetNameLen = tradeList_IN[i].assetName.length;
-      
-      // JSON file comes with commas
-      // So we exclude initial and last comma before
-      // passing asset name to the buy/sell functions
-      Increment2Date(year, month, day, connectionID_IN);  
-      if (tradeList_IN[i].tradeType == Trade_T.Buy) {
-        Buy!(logger.on)( [
-          tradeList_IN[i].assetName[1 .. cast(uint)assetNameLen-1]], [
-          to!int(tradeList_IN[i].assetQuantity) ],
-          connectionID_IN);
-      }
-      else if (tradeList_IN[i].tradeType == Trade_T.Sell) {
-        Sell!(logger.on)( [
-          tradeList_IN[i].assetName[1 .. cast(uint)assetNameLen-1]], [
-          to!int(tradeList_IN[i].assetQuantity) ],
-          connectionID_IN);
-      } 
-  }
 }
 
 /***********************************
  * Summary: Exports stash matrix as a 
  * csv file to executable's folder.
  * Params:
- *      name_IN = Name of the output csv file
+ *    name_IN = Name of the output csv file
  *    mode_IN = 0 (asset quantity) or 1 (asset price).
  *    connectionID_IN = String
  * Returns:
@@ -1176,10 +649,10 @@ string ExportEngineCSV(
   AssetColumn_t mode_IN,
   string connectionID_IN = "none") 
 {
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+  if(connectionID_IN == "none") connectionID_IN = m_mainConnectionID;
   Frame[] equity_matrix = EquityMatrix(
     connectionID_IN, 
-    _engineDataFormat.mysqlcloseindex, 
+    closeIndex, 
     mode_IN);   
   string result;
   string header_text = "Date,";
@@ -1204,7 +677,9 @@ string ExportEngineCSV(
   }
 
   if(name_IN != "") {
-    std.file.write(name_IN~".csv", result);
+    if (!exists("out/"))
+      mkdir("out/");
+    std.file.write("out/"~name_IN~".csv", result);
   }
 
   return result;
@@ -1217,7 +692,7 @@ string ExportEngineCSV(
  * Keep in mind returnStructure.valueArray.length should be non-zero upon return.
  * If it is zero, it indicates a holiday or market close day.
  * Params:
- *      name_IN = Name of the output csv file
+ *    name_IN = Name of the output csv file
  *    startTick_IN = Start tick index
  *    numberOfRows_IN = Number of rows to grab
  *    mode_IN = 0 (asset quantity) or 1 (asset price).
@@ -1236,7 +711,7 @@ Frame AssetColumn(
   string connectionID_IN = "none",
   string ohlc_IN = "")
 {
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+  if(connectionID_IN == "none") connectionID_IN = m_mainConnectionID;
 
   Frame returnStructure;    
 
@@ -1276,7 +751,7 @@ Frame AssetColumn(
     if(assetQuantityVector != null) {
       // Used for iterating over all dates. These dates 
       // are matched with ticks inside the stash
-      Date[] dateSeries = GetDateColumn(
+      Date[] dateSeries = DateColumn(
         startTick_IN, 
         numberOfRows_IN);
 
@@ -1286,12 +761,6 @@ Frame AssetColumn(
       double  [] valueSeriesOutput;
 
       for (int i = startTick_IN+1; i < endTick+1; i++) {
-        ResultRange range = MySQLQuery(
-          "select * from "~this._engineDataFormat.pricetablename~
-          " where "~this._engineDataFormat.symbolcolumn~" = \"" ~ name_IN ~ 
-          "\" and "~this._engineDataFormat.datecolumn~"= \"" ~ 
-          dateSeries[i-1].toISOExtString() ~ "\";", connectionID_IN);
-
         dateSeriesOutput  ~= dateSeries[i-1];
 
         // Handle cash and dividends seperately since they don't need mysql connection.
@@ -1313,8 +782,8 @@ Frame AssetColumn(
           mode_IN == AssetColumn_t.Value ) {
           // Check: Whether tick exists at given date. 
           // Enter here when index is dividend too.
-          if(!range.empty) {
-            double asset_value = range.front[assetIndex_IN].get!double;
+          if(GetPrice(name_IN, dateSeries[i-1], closeIndex, connectionID_IN) > 0) {
+            double asset_value = GetPrice(name_IN, dateSeries[i-1], assetIndex_IN, connectionID_IN);
             double number_of_assets = to!double(assetQuantityVector[i-startTick_IN]);
             valueSeriesOutput ~= asset_value*number_of_assets;
           }
@@ -1351,7 +820,7 @@ Frame AssetColumn(
  *    dateArray: Date array with length "number of rows"
  */ 
 pure Date[] 
-GetDateColumn(
+DateColumn(
   int startTick_IN, 
   int numberOfRows_IN)  
 {
@@ -1397,27 +866,27 @@ GetDateColumn(
  */ 
 double EquityAtCurrentDate(string connectionID_IN = "none") 
 {
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+  if(connectionID_IN == "none") connectionID_IN = m_mainConnectionID;
 
   Frame currentAssetValue;
   double equity = 0.0;
-  foreach (string name; GetNames()) {
+  foreach (string name; SymbolsPortfolio()) {
     currentAssetValue = AssetColumn(
       name, 
-      GetCurrentTick(), 
+      CurrentTick(), 
       1, 
       AssetColumn_t.Value,
-      _engineDataFormat.mysqlcloseindex,
+      closeIndex,
       connectionID_IN);
 
     equity += currentAssetValue.valueArray[0];
   }
   currentAssetValue = AssetColumn(
     "Cash", 
-    GetCurrentTick(), 
+    CurrentTick(), 
     1, 
     AssetColumn_t.Value,
-    _engineDataFormat.mysqlcloseindex,
+    closeIndex,
     connectionID_IN);
 
   equity += currentAssetValue.valueArray[0];  
@@ -1441,12 +910,12 @@ Frame[] EquityMatrix (
 {
     import std.stdio: writeln;
     import std.datetime.stopwatch: StopWatch, AutoStart;  
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+  if(connectionID_IN == "none") connectionID_IN = m_mainConnectionID;
 
     auto myStopWatch = StopWatch(AutoStart.no);
     myStopWatch.start();
 
-  string[] names = GetNames();
+  string[] names = SymbolsPortfolio();
   Frame[] asset_matrix;
 
   // Add cash
@@ -1475,7 +944,7 @@ Frame[] EquityMatrix (
     0, 
     _myStash.GetStashTick(), 
     asset_column_t,
-    _engineDataFormat.mysqlcloseindex,
+    closeIndex,
     connectionID_IN,
     "_close");
 
@@ -1484,7 +953,7 @@ Frame[] EquityMatrix (
     0, 
     _myStash.GetStashTick(), 
     asset_column_t,
-    _engineDataFormat.mysqlopenindex,
+    openIndex,
     connectionID_IN,
     "_open"); 
 
@@ -1493,7 +962,7 @@ Frame[] EquityMatrix (
     0, 
     _myStash.GetStashTick(), 
     asset_column_t,
-    _engineDataFormat.mysqlhighindex,
+    highIndex,
     connectionID_IN,
     "_high");   
 
@@ -1502,7 +971,7 @@ Frame[] EquityMatrix (
     0, 
     _myStash.GetStashTick(), 
     asset_column_t,
-    _engineDataFormat.mysqllowindex,
+    lowIndex,
     connectionID_IN,
     "_low");
   }
@@ -1516,14 +985,14 @@ Frame[] EquityMatrix (
 
 /***********************************
  * Summary: Helper function. Calling equity matrix after
- *  updates to portfolio are finished. Instead of calling it
- *  when a user asks for it.
+ * updates to portfolio are finished. Instead of calling it
+ * when a user asks for it.
  * Template: 
  *    connectionID_IN = String
  */ 
 void UpdateEquityMatrix(string connectionID_IN = "none")
 {
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+  if(connectionID_IN == "none") connectionID_IN = m_mainConnectionID;
   if(_dirty)
   {
     _all_assets = EquityMatrix(
@@ -1540,7 +1009,7 @@ void UpdateEquityMatrix(string connectionID_IN = "none")
  *    dividend: Returns a frame which contains all dividends
  */ 
 Frame Dividend(string connectionID_IN = "none") {
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+  if(connectionID_IN == "none") connectionID_IN = m_mainConnectionID;
 
   Frame dividend;
   UpdateEquityMatrix(connectionID_IN);
@@ -1568,7 +1037,7 @@ Frame Dividend(string connectionID_IN = "none") {
  *    dividend_json: dividend frame represented in json format
  */ 
 JSONValue Dividend_json(string connectionID_IN = "none") {
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+  if(connectionID_IN == "none") connectionID_IN = m_mainConnectionID;
 
   Frame dividend = Dividend(connectionID_IN);
   string[] dates;
@@ -1590,7 +1059,7 @@ JSONValue Dividend_json(string connectionID_IN = "none") {
  *    cash: Returns a frame
  */ 
 Frame NonCashEquity(string connectionID_IN = "none") {
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+  if(connectionID_IN == "none") connectionID_IN = m_mainConnectionID;
 
   Frame cash = Cash(connectionID_IN);
   Frame equity = Equity(connectionID_IN);
@@ -1615,7 +1084,7 @@ Frame NonCashEquity(string connectionID_IN = "none") {
  *    nonCashEquity_json: equity frame represented in json format
  */ 
 JSONValue NonCashEquity_json(string connectionID_IN = "none") {
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+  if(connectionID_IN == "none") connectionID_IN = m_mainConnectionID;
 
   Frame nonCashEquity = NonCashEquity(connectionID_IN);
   string[] dates;
@@ -1637,14 +1106,14 @@ JSONValue NonCashEquity_json(string connectionID_IN = "none") {
  *    cash: Returns a frame which contains all cash
  */ 
 Frame Cash(string connectionID_IN = "none") {
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+  if(connectionID_IN == "none") connectionID_IN = m_mainConnectionID;
 
   return AssetColumn(
     "Cash", 
     0, 
     _myStash.GetStashTick(), 
     AssetColumn_t.Quantity,
-    _engineDataFormat.mysqlcloseindex,
+    closeIndex,
     connectionID_IN);
 }
 
@@ -1657,7 +1126,7 @@ Frame Cash(string connectionID_IN = "none") {
  *    cash_json: cash frame represented in json format
  */ 
 JSONValue Cash_json(string connectionID_IN = "none") {
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+  if(connectionID_IN == "none") connectionID_IN = m_mainConnectionID;
 
   Frame cash = Cash(connectionID_IN);
   string[] dates;
@@ -1683,7 +1152,7 @@ Frame Equity(
   string connectionID_IN = "none", 
   int assetIndex_IN = 5) 
 {
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+  if(connectionID_IN == "none") connectionID_IN = m_mainConnectionID;
 
   Frame equity;
   UpdateEquityMatrix(connectionID_IN);
@@ -1695,19 +1164,19 @@ Frame Equity(
       if(_all_assets[i].name != "Dividend" || _all_assets[i].name != "Deposit") {
         if(_all_assets[i].name == "") continue;
         
-        if(assetIndex_IN == _engineDataFormat.mysqlopenindex) 
+        if(assetIndex_IN == openIndex) 
           if(indexOf(_all_assets[i].name, "open") != -1)
             daily_equity += _all_assets[i].valueArray[t];
 
-        if(assetIndex_IN == _engineDataFormat.mysqlhighindex) 
+        if(assetIndex_IN == highIndex) 
           if(indexOf(_all_assets[i].name, "high") != -1)
             daily_equity += _all_assets[i].valueArray[t];
 
-        if(assetIndex_IN == _engineDataFormat.mysqllowindex) 
+        if(assetIndex_IN == lowIndex) 
           if(indexOf(_all_assets[i].name, "low") != -1)
             daily_equity += _all_assets[i].valueArray[t];
 
-        if(assetIndex_IN == _engineDataFormat.mysqlcloseindex) 
+        if(assetIndex_IN == closeIndex) 
           if(indexOf(_all_assets[i].name, "close") != -1)
             daily_equity += _all_assets[i].valueArray[t];
   
@@ -1736,7 +1205,7 @@ JSONValue Equity_json(
   string connectionID_IN = "none",
   int assetIndex_IN = 5) 
 {
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+  if(connectionID_IN == "none") connectionID_IN = m_mainConnectionID;
 
   Frame equity = Equity(connectionID_IN, assetIndex_IN);
   string[] dates;
@@ -1746,7 +1215,7 @@ JSONValue Equity_json(
 
   JSONValue equity_json = ["name": equity.name];
   equity_json.object["values"] = equity.valueArray;
-  if(assetIndex_IN == this._engineDataFormat.mysqlcloseindex)
+  if(assetIndex_IN == closeIndex)
   {
     equity_json.object["dates"] = dates;
   }
@@ -1767,7 +1236,7 @@ JSONValue PieChart_json(
   string connectionID_IN = "none", 
   string time_IN = "end") 
 {
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+  if(connectionID_IN == "none") connectionID_IN = m_mainConnectionID;
 
   UpdateEquityMatrix(connectionID_IN);
     string[] asset_names;
@@ -1806,7 +1275,7 @@ auto DailyReturns(
   double resolution, 
   string connectionID_IN = "none") 
 {
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+  if(connectionID_IN == "none") connectionID_IN = m_mainConnectionID;
 
   Frame equity = Equity(connectionID_IN);
   double[] daily_returns;
@@ -1837,7 +1306,7 @@ auto DailyReturns(
  */ 
 JSONValue DailyReturns_json(string connectionID_IN = "none") 
 {
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+  if(connectionID_IN == "none") connectionID_IN = m_mainConnectionID;
 
   Frame equity = Equity(connectionID_IN);
   double[] daily_returns;
@@ -1867,7 +1336,7 @@ JSONValue DailyReturns_json(string connectionID_IN = "none")
   double resolution, 
   string connectionID_IN = "none") 
  {
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+  if(connectionID_IN == "none") connectionID_IN = m_mainConnectionID;
 
   Frame equity = Equity(connectionID_IN);
   double[] weekly_returns;
@@ -1903,7 +1372,7 @@ JSONValue DailyReturns_json(string connectionID_IN = "none")
   double resolution, 
   string connectionID_IN = "none") 
 {
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+  if(connectionID_IN == "none") connectionID_IN = m_mainConnectionID;
 
   Frame equity = Equity(connectionID_IN);
   double[] monthly_returns;
@@ -1939,7 +1408,7 @@ Frame Percentage(
   Frame valueArray_IN, 
   string connectionID_IN = "none") 
 {
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+  if(connectionID_IN == "none") connectionID_IN = m_mainConnectionID;
 
   Frame percentageArray;
   ulong length = valueArray_IN.dateArray.length;
@@ -1972,7 +1441,7 @@ JSONValue Percentage_json(
   string connectionID_IN = "none",
   int assetIndex_IN = 5) 
 {
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+  if(connectionID_IN == "none") connectionID_IN = m_mainConnectionID;
 
   Frame equity = Equity(connectionID_IN, assetIndex_IN);
   Frame equityPerc = Percentage(equity, connectionID_IN);
@@ -1988,26 +1457,30 @@ JSONValue Percentage_json(
 }
 
 /***********************************
- * Summary: Returns close prices of an asset between engine begin and current dates. 
+ * Summary: Returns close prices of 
+ * an asset between engine begin 
+ * and current dates. It will fill
+ * zeros if price is not found
+ * for whatever reason. 
  * Params:
  *    symbol_IN = Asset in the database.
  *    connectionID_IN = String
  * Returns:
  *    assetArray: Returns a frame which contains all prices of the given asset
- * Bugs: It will return a 0.0 array if symbol is not in backend.
+ * 
  */ 
 Frame GetPrice(
   string symbol_IN, 
   string connectionID_IN = "none") 
 {
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+  if(connectionID_IN == "none") connectionID_IN = m_mainConnectionID;
 
   Frame cash_frame = AssetColumn(
     "Cash", 
     0, 
     _myStash.GetStashTick(), 
     AssetColumn_t.Quantity,
-    _engineDataFormat.mysqlcloseindex,
+    closeIndex,
     connectionID_IN);
 
   Frame result;
@@ -2016,84 +1489,78 @@ Frame GetPrice(
   // Otherwise it won't work with equity output
   foreach(date; cash_frame.dateArray) {
     result.dateArray ~= date;
-    ResultRange range = MySQLQuery(
-      "select * from "~this._engineDataFormat.pricetablename~
-      " where symbol=\""~symbol_IN~
-      "\" and date=\""~date.toISOExtString()~"\";", connectionID_IN);
-    if(range.empty) {
-      if(result.valueArray.length == 0) result.valueArray ~= 0.0;
-      else result.valueArray ~= result.valueArray[result.valueArray.length-1];
-    }
-    else {
-      result.valueArray ~= range.front[this._engineDataFormat.mysqlcloseindex].get!double;
-    }
+    result.valueArray ~= GetPrice(symbol_IN, date, closeIndex, connectionID_IN);
   }
   return result;
 }
 
 /***********************************
- * Summary: Returns close price of an asset at input date.
+ * Summary: Returns close price of 
+ * an asset at input date. Returns
+ * -1.0 if price is not found
+ * for any reason
  * Params:
  *    symbol_IN = Asset in the database.
- *    date_IN = If nothing is found function returns empty.
+ *    date_IN = If nothing is found 
+ *              function returns empty.
  *    connectionID_IN = String
  * Returns:
- *    asset_price: Returns price as double precision, -1 if operation fails.
+ *    asset_price: Returns price as 
+ *                 double precision, 
+ *                 -1.0 if operation 
+ *                 fails.
  */ 
 double GetPrice(
   string symbol_IN, 
-  Date date_IN, 
+  Date date_IN,
+  int index_IN,
   string connectionID_IN = "none") 
 {
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+  if(connectionID_IN == "none") connectionID_IN = m_mainConnectionID;
 
-  ResultRange range = MySQLQuery(
-    "select * from "~this._engineDataFormat.pricetablename~
+  ResultRange range = Query(
+    "select * from "~priceTableName~
     " where symbol=\""~symbol_IN~
     "\" and date=\""~date_IN.toISOExtString()~"\";", connectionID_IN);
 
   if(range.empty) {
-    throw new Exception("Price data for "~symbol_IN~" at "~date_IN.toISOExtString()~" not found.");
+    return -1.0;
   }
   else {
-    return range.front[this._engineDataFormat.mysqlcloseindex].get!double;
+    return range.front[index_IN].get!double;
   }
 }
 
 /***********************************
- * Summary: Returns close price of a group of assets. Not unit tested.
+ * Summary: Returns close price of a 
+ * group of assets. Not unit tested.
  * Params:
- *    symbols_IN = Group of assets in the database
- *    date_IN = No weekends etc ... Function does not check and will return -1.
+ *    symbols_IN = Group of assets 
+ *                 in the database
+ *    date_IN = No weekends etc ... 
+ *              Function does not check 
+ *              and will return -1.
  *    connectionID_IN = String
  * Returns:
- *    asset_prices: Returns price of each asset in the group as a double[]
+ *    asset_prices: Returns price of 
+ *                  each asset in the 
+ *                  group as a double[]
  */ 
 double[] GetPrice(
   string[] symbols_IN, 
   Date date_IN, 
   string connectionID_IN = "none") 
 {
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+  if(connectionID_IN == "none") connectionID_IN = m_mainConnectionID;
 
   double[] result;
   for(int i = 0; i<symbols_IN.length; ++i) {
-    result ~= GetPrice(symbols_IN[i], GetCurrentDate(), connectionID_IN);
+    result ~= GetPrice(
+      symbols_IN[i], 
+      CurrentDate(), 
+      closeIndex, 
+      connectionID_IN);
   }
-  return result;
-}
-
-/***********************************
- * Summary: Returns names in stash as a string array
- */ 
-pure string[] 
-GetNames() {
-  string[] result;
-  for(int i = 0; i<_stashTickNamesIndex ; i++) {
-    // Tick names in the engine are saved in a list with constant access time.
-    result ~= _stashTickNames[i];
-  }
-
   return result;
 }
 
@@ -2101,59 +1568,60 @@ GetNames() {
  * Summary: Return the current stach tick. 
  */ 
 pure int 
-GetCurrentTick() {
+CurrentTick() {
   return _myStash.GetStashTick()-1;
 }
 
 /***********************************
  * Summary: Returns current date of the engine.
+ *    Date: Final date
  */ 
 pure Date 
-GetCurrentDate() {
+CurrentDate() {
   return _currentDate;
 }
 
 /***********************************
  * Summary: Returns start date of the engine.
+ * Returns:
+ *    Date: Begin date
  */ 
 pure Date 
-GetStartDate() {
+StartDate() 
+{
   return _startDate;
 } 
 
 /***********************************
- * Summary: Returns number of symbol in portfolio at current date
+ * Summary: Returns quantity of the symbol 
+ * in portfolio at the current date
+ * Returns:
+ *    int: Warning, won't work with currencies
  */ 
 int Get(
   string symbol_IN, 
   string connectionID_IN = "none") 
 {
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+  if(connectionID_IN == "none") connectionID_IN = m_mainConnectionID;
   Frame f = AssetColumn(
     symbol_IN, 
-    GetCurrentTick(), 
+    CurrentTick(), 
     1, 
     AssetColumn_t.Quantity,
-    _engineDataFormat.mysqlcloseindex,
+    closeIndex,
     connectionID_IN);
   return to!int(f.valueArray[0]);
 }
 
 /***********************************
  * Summary: Return initial deposit
+ * Returns:
+ *    double: First deposit
  */ 
 pure double 
-InitialDeposit() {
+InitialDeposit() 
+{
   return _initialDeposit;
-}
-
-/***********************************
- * Summary: Mysql connection information
- * as mysql_connection struct. This can
- * be used to initialize mysql connection.
- */ 
-pure mysql_connection ConnectionInformation() {
-  return _connectionInformation;
 }
 
 private:
@@ -2161,7 +1629,7 @@ private:
  * Summary: Refresh calls this. It configures the stash
  * class with dividend, cash.
  * Params:
- *      initialDeposit_IN = Money added to portfolio at start date
+ *    initialDeposit_IN = Money added to portfolio at start date
  *    startDate_IN = Start date
  */
 void InitializeStash(
@@ -2195,17 +1663,17 @@ void InitializeStash(
  *    connectionID_IN = String
  */
 void InitializeMetaData(string connectionID_IN = "none") {
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+  if(connectionID_IN == "none") connectionID_IN = m_mainConnectionID;
 
   int rowIndex = 0;   // Index checks first line. Does not process it.
-  foreach(row; MySQLQuery("select * from "~this._engineDataFormat.metatablename~";", connectionID_IN).array) {
+  foreach(row; Query("select * from "~metaTablename~";", connectionID_IN).array) {
     MetaData metaRow;
     // Begin/End dates are listed as 4th and 5th columns on mysql meta table 
-    metaRow.beginDate = to!string(row[this._engineDataFormat.metabeginindex]);
-    metaRow.endDate = to!string(row[this._engineDataFormat.metaendindex]);
+    metaRow.beginDate = to!string(row[metaBeginIndex]);
+    metaRow.endDate = to!string(row[metaEndIndex]);
 
     // 0th column is tick names.
-    metaRow.tickName = to!string(row[this._engineDataFormat.metasymbolindex]);
+    metaRow.tickName = to!string(row[metaSymbolIndex]);
     _metaData[metaRow.tickName] = metaRow;
     rowIndex += 1;
   }
@@ -2223,7 +1691,7 @@ double[] NormalizeDeposits(
   Frame equity_IN, 
   string connectionID_IN = "none")
 {
-  if(connectionID_IN == "none") connectionID_IN = _mainConnectionID;
+  if(connectionID_IN == "none") connectionID_IN = m_mainConnectionID;
 
   double[] normalized_equity;
   ulong length = equity_IN.dateArray.length;
@@ -2233,7 +1701,7 @@ double[] NormalizeDeposits(
     0, 
     _myStash.GetStashTick(), 
     AssetColumn_t.Quantity,
-    _engineDataFormat.mysqlcloseindex,
+    closeIndex,
     connectionID_IN);
 
   double old_deposit = deposits.valueArray[0];
@@ -2247,62 +1715,172 @@ double[] NormalizeDeposits(
   return normalized_equity;
 }
 
-/// mysql table information
-engine_data_format _engineDataFormat; 
+/***********************************
+ * Summary: Utility function to check if the current date is between 
+ * begin and end dates.
+ * Params:
+ *      beginDate_IN = Begin date. Format -> yyyy-mm-dd
+ *    endDate_IN = End date
+ * Returns:
+ *    True within range and false if not
+ */
+pure bool 
+IsSymbolWithinDateRanges(
+  string beginDate_IN, 
+  string endDate_IN) 
+{
+  // Add to array if engine's current date is between begin and end dates.
+  int year = to!int(beginDate_IN[0 .. 4]);
+  int month = to!int(beginDate_IN[5 .. 7]);
+  int day = to!int(beginDate_IN[8 .. 10]);
+  auto beginDate_dt = Date(year, month, day);
 
-/// Used to create Mysql connection string
-mysql_connection _connectionInformation;
+  year = to!int(endDate_IN[0 .. 4]);
+  month = to!int(endDate_IN[5 .. 7]);
+  day = to!int(endDate_IN[8 .. 10]);
+  auto endDate_dt = Date(year, month, day);
+  if(_currentDate >= beginDate_dt && _currentDate < endDate_dt) {
+    return true;
+  }
+  else {
+    return false;
+  }
+}
 
-/// Obtained from meta data's length
-ulong _totalTicks = 0; 
+BuySell_t BuyImpl(
+  string assetName_IN, 
+  double assetquantity_IN,
+  string connectionID_IN = "none") 
+{
+  if(connectionID_IN == "none") connectionID_IN = m_mainConnectionID;
 
-/// Tick names and begin/end dates contained in MetaData dictionary
-MetaData[string] _metaData;   
+  //Pre-Buy Checks
+  // Check: Negative input
+  if(assetquantity_IN < 0) {
+    return BuySell_t.Error_Negative;
+  }
 
-/// assets/ticks mean same thing. fix naming.
-const int _maxAssets = 100; 
+  // Check: Weekend
+  if(_currentDate.dayOfWeek == DayOfWeek.sat || _currentDate.dayOfWeek == DayOfWeek.sun) {
+    return BuySell_t.Error_Weekend;
+  }
 
-/// Max day increments
-const int _maxTicks = 10000; 
+  // Check: Tick Name in Database
+  if(SymbolAvailableAtDate(assetName_IN, connectionID_IN) == SymbolAvailableAtDate_t.Error_TickNotFound) {
+    return BuySell_t.Error_TickNotFound;
+  } 
 
-/// Max number of trades
-const int _maxTrades = 10000;
+  // Check: Whether tick exists at given date.
+  if(SymbolAvailableAtDate(assetName_IN, connectionID_IN) == SymbolAvailableAtDate_t.Error_TickNotAvailableAtDate) {
+    return BuySell_t.Error_TickNotAvailableAtDate;
+  }
 
-/// Contains the stash as a private variable
-Stash _myStash;
+  // Check: Cash and make sure asset quantity is positive
+  double asset_value = GetPrice(assetName_IN, CurrentDate(), closeIndex, connectionID_IN);
+  double number_of_assets = assetquantity_IN;
+  double assetPrice = asset_value*number_of_assets;
+  double[2] cashAmount = _myStash.GetItemAtCurrentIndex("Cash");
+  if(cashAmount[1] != 1) {
+    return BuySell_t.Error_Stash;
+  }
+  if(cashAmount[0] < assetPrice || assetquantity_IN < 0) {
+    return BuySell_t.Error_TooPoor;
+  }
 
-/// For fast access. Store tick names in stash as an associative array.
-string[_maxTicks-1] _stashTickNames; 
+  // Buy checks passed ...
 
-/// Trade list
-Trade[_maxTrades] _engineTradeList;
+  // Decide whether tick name is in Portfolio
+  if(_myStash.CheckKey(assetName_IN) == _myStash.CheckKey_t.Fail) {
+    // Add asset if not in portfolio
+    _myStash.AddAsset(assetName_IN, Quantity_t.double_Q);
 
-/// Number of succesful trades in this engine instance
-int _tradeNumber = 0;
+    // Add asset name to internal string array too
+    _stashTickNames[_stashTickNamesIndex] = assetName_IN;
+    _stashTickNamesIndex += 1;
+  }
 
-// Number of days passed after the first End of data feed detection
-int _dataEndCounter = 0;
+  // Increase asset quantity.
+  _myStash.ModifyStash!double(assetquantity_IN, assetName_IN); 
 
-// Triggered to True when data feed end is detected.
-bool _dataEndDetected = false;
+  // Decerease cash 
+  _myStash.ModifyStash!double(-assetPrice , "Cash");  
 
-/// Index value to keep track of _stashTickNames
-int _stashTickNamesIndex; 
+  // Error on max allowed trades
+  if(_tradeNumber >= _maxTrades) return BuySell_t.Error_MaxTrades;
 
-/// Dates
-Date _startDate;    
-Date _currentDate; 
-double _initialDeposit;
+  // Update trade list now that buy action is successful
+  Trade currentTrade;
+  currentTrade.tradeType = Trade_T.Buy;
+  currentTrade.assetName = assetName_IN;
+  currentTrade.assetQuantity = assetquantity_IN;
+  currentTrade.tradeDate = _currentDate.toISOExtString();
+  _engineTradeList[_tradeNumber] = currentTrade;
+  _tradeNumber++;
 
-/// Date array updated at each increment. Starts at index (1). Index (0) is uninitialized.          
-Date[_maxTicks] _dateArray; 
+  return BuySell_t.Success;
+}
 
-/// Contains time series data for front end
-Frame[] _all_assets;
+BuySell_t SellImpl(
+  string assetName_IN, 
+  double assetquantity_IN,
+  string connectionID_IN = "none") 
+{
+  if(connectionID_IN == "none") connectionID_IN = m_mainConnectionID;
 
-// Makes sure data collection form engine is only done once
-bool _dirty = true;
-} 
+  // Check: Negative input
+  if(assetquantity_IN < 0) {
+    return BuySell_t.Error_Negative;
+  }
+
+  // Check: Weekend
+  if(_currentDate.dayOfWeek == DayOfWeek.sat || _currentDate.dayOfWeek == DayOfWeek.sun) {
+    return BuySell_t.Error_Weekend;
+  }
+
+  // Check: Decide whether tick name is in the stash
+  if(_myStash.CheckKey(assetName_IN) == _myStash.CheckKey_t.Fail) { 
+    return BuySell_t.Error_TickNotFound;
+  } 
+
+  // Check: If asset quantity in the stash is larger than zero.
+  double[2] assetQuantity = _myStash.GetItemAtCurrentIndex(assetName_IN);
+  if(assetQuantity[1] != 1) {
+    return BuySell_t.Error_Stash;
+  }
+
+  if( ( assetQuantity[0] -  assetquantity_IN ) < 0) {
+    return BuySell_t.Error_TooPoor;
+  }
+  
+  // Check: Whether tick exists at given date.
+  if(SymbolAvailableAtDate(assetName_IN, connectionID_IN) == SymbolAvailableAtDate_t.Error_TickNotAvailableAtDate) {
+    return BuySell_t.Error_TickNotAvailableAtDate;
+  }
+
+  double asset_value = GetPrice(assetName_IN, CurrentDate(), closeIndex, connectionID_IN);
+  double number_of_assets = to!double(assetquantity_IN);
+  double assetPrice = asset_value*number_of_assets;
+
+  // Increase asset quantity.
+  _myStash.ModifyStash!double(-assetquantity_IN, assetName_IN);  
+
+  // Decerease cash 
+  _myStash.ModifyStash!double(assetPrice , "Cash"); 
+
+  // Error on max allowed trades
+  if(_tradeNumber >= _maxTrades) return BuySell_t.Error_MaxTrades;
+
+  // Update trade list now that sell action is successful
+  Trade currentTrade;
+  currentTrade.tradeType = Trade_T.Sell;
+  currentTrade.assetName = assetName_IN;
+  currentTrade.assetQuantity = assetquantity_IN;
+  currentTrade.tradeDate = _currentDate.toISOExtString();
+  _engineTradeList[_tradeNumber] = currentTrade;
+  _tradeNumber++;
+
+  return BuySell_t.Success;   
+}
 
 /***********************************
  * PortfolioContents: Writes a message to a string indicating each asset's 
@@ -2344,28 +1922,56 @@ string PortfolioContents(Frame[] valuesIN, Frame[] quantities_IN) {
   return portfolioContent_msg;
 }
 
-/// Mysql interface format definition.
-struct engine_data_format {
-  string pricetablename;
-  string metatablename;   
-  string datecolumn;
-  string symbolcolumn;
-  int mysqlopenindex; 
-  int mysqlhighindex;
-  int mysqllowindex;
-  int mysqlcloseindex;
-  int mysqldividendindex;
-  int mysqlsplitindex;
-  int metasymbolindex;
-  int metabeginindex;
-  int metaendindex; 
-}
+/// Obtained from meta data's length
+ulong _totalTicks = 0; 
 
-/// Single row returned from mysql table. It contains a return enum.
-struct DataRow {
-  TickAvailableAtDate_t   isAvailable;  // error
-  ResultRange       data;     // mysql row
-}
+/// Tick names and begin/end dates contained in MetaData dictionary
+MetaData[string] _metaData;   
+
+/// assets/ticks mean same thing. fix naming.
+const int _maxAssets = 100; 
+
+/// Max day increments
+const int _maxTicks = 10000; 
+
+/// Max number of trades
+const int _maxTrades = 10000;
+
+/// Contains the stash as a private variable
+Stash _myStash;
+
+/// For fast access. Store tick names in stash as an associative array.
+string[_maxTicks-1] _stashTickNames; 
+
+/// Trade list
+Trade[_maxTrades] _engineTradeList;
+
+/// Number of succesful trades in this engine instance
+int _tradeNumber = 0;
+
+// Number of days passed after the first End of data feed detection
+int _dataEndCounter = 0;
+
+/// Triggered to True when data feed end is detected.
+bool _dataEndDetected = false;
+
+/// Index value to keep track of _stashTickNames
+int _stashTickNamesIndex; 
+
+/// Dates
+Date _startDate;    
+Date _currentDate; 
+double _initialDeposit;
+
+/// Date array updated at each increment. Starts at index (1). Index (0) is uninitialized.          
+Date[_maxTicks] _dateArray; 
+
+/// Contains time series data for front end
+Frame[] _all_assets;
+
+/// Makes sure data collection form engine is only done once
+bool _dirty = true;
+} 
 
 /// Frame contains time stamped price information and asset name
 struct Frame {
@@ -2395,19 +2001,10 @@ struct Trade {
   string tradeDate;
 }
 
-/// Contains initial conditions of a portfolio
-struct InitialCondition {
-  string startDate;
-  double initialDeposit;
-}
-
 /// Turn on/off console logging
 enum logger {
   on, 
   off} 
-
-/// Enums for different types of data formats. At the moment only SDF is supported.
-enum data_format {sdf} 
 
 /// Asset column's quantity or value indicator. Used in AssetColumn.
 enum AssetColumn_t {
@@ -2421,7 +2018,7 @@ enum Refresh_t {
 }
 
 /// Return type for tick available at date 
-enum TickAvailableAtDate_t {
+enum SymbolAvailableAtDate_t {
   Success, 
   Error_TickNotFound, 
   Error_TickNotAvailableAtDate} 
@@ -2449,4 +2046,4 @@ enum IncrementDate_t {
 /// Return type for increment-2-date
 enum Increment2Date_t {
   Success, 
-  Error_TargetOld} // used in increment2date 
+  Error_TargetOld}

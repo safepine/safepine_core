@@ -5,14 +5,16 @@ import std.json: JSONValue, JSONOptions, parseJSON;
 import std.typecons: tuple, Tuple; 
 
 // Safepine
-import safepine_core.backend.sdf: sdf;
+import safepine_core.backend.sqlinterface;
 import safepine_core.math.matrix;
+import safepine_core.math.filters;
 import safepine_core.project;
 import safepine_core.quantum.algorithms;
 import safepine_core.quantum.engine;
+import safepine_core.quantum.frame;
 
 // Third party
-import mysql: Connection, exec, ResultRange, query;
+import mysql: Connection, exec, query;
 import vibe.d; 
 import vibe.web.auth;
 
@@ -25,7 +27,7 @@ class DataInterface
 {
   this(string cachePath_IN)
   {
-    dataPath = cachePath_IN;
+    m_dataPath = cachePath_IN;
   }
 
   // tranmission
@@ -39,7 +41,31 @@ class DataInterface
     auto myStopWatch = StopWatch(AutoStart.no);
 
     myStopWatch.start();
-    JSONValue all_data = ImportData(dataPath);
+
+    JSONValue all_data = ImportData(m_dataPath);
+    for(int i = 0; i < m_symbols.length; ++i) {
+      double[] openPrices, highPrices, lowPrices, closePrices;
+      string[] dates;
+
+      for(int j = 0; j < all_data[m_symbols[i]]["prices"].array.length; ++j) {
+        openPrices ~= to!double(all_data[m_symbols[i]]["prices"].array[j]["open"].str);
+        highPrices ~= to!double(all_data[m_symbols[i]]["prices"].array[j]["high"].str);
+        lowPrices ~= to!double(all_data[m_symbols[i]]["prices"].array[j]["low"].str);
+        closePrices ~= to!double(all_data[m_symbols[i]]["prices"].array[j]["close"].str);
+        dates ~= all_data[m_symbols[i]]["prices"].array[j]["date"].str;
+      }
+
+      // Standard moving average
+      int lookbackPeriod = 30;
+      Matrix closePrices_Vector = new Matrix(closePrices);
+      Matrix filteredPrices_Vector = SMA(closePrices_Vector, lookbackPeriod); 
+      // Fill lookback period with initial values
+      for(int j = 0; j < lookbackPeriod; ++j) {
+        filteredPrices_Vector[0, j] = filteredPrices_Vector[0, lookbackPeriod];
+      }
+      all_data[m_symbols[i]~"_filtered"] = filteredPrices_Vector.toDouble_v;
+    }
+
     res.writeBody(all_data.toString(JSONOptions.specialFloatLiterals));
     writeln("[DataInterface: GET/tranmission] Timing: "~to!string((to!double(myStopWatch.peek.total!"usecs")*0.001))~" ms");
 
@@ -78,27 +104,28 @@ private:
       auto index = file.indexOf("_");
       string prices_raw = to!string(read(path_IN~"/"~file));
       string symbol = file[0 .. index];
+      m_symbols ~= symbol;
       result[symbol] = parseJSON(prices_raw);
     }
     return result;
   }
 
-  string dataPath;
+  string m_dataPath;
+  string[] m_symbols;
 }
 
 @requiresAuth
 class PortfolioInterface
 {
   this(
-    string                 cachePath_IN, 
-    AssetAllocationProfile profile_IN) 
+    string               cachePath_IN, 
+    ConfigurationProfile profile_IN) 
   {
     m_cachePath = cachePath_IN;
     m_profile = profile_IN;
   }
 
   ~this() {
-    m_backend.Close();
     m_portfolio.Close();
     m_benchmark.Close();
   }
@@ -115,12 +142,12 @@ class PortfolioInterface
     myStopWatch.start();
 
     string connectionID_Portfolio = m_portfolio.GenerateConnectionID();
-    m_portfolio.InitializeMysql(
+    m_portfolio.ConnectSQL(
       m_portfolio.ConnectionInformation(),
       connectionID_Portfolio);
 
     string connectionID_Benchmark = m_benchmark.GenerateConnectionID();
-    m_benchmark.InitializeMysql(
+    m_benchmark.ConnectSQL(
       m_benchmark.ConnectionInformation(),
       connectionID_Benchmark);
 
@@ -148,30 +175,30 @@ class PortfolioInterface
     myStopWatch.stop();
   }
 
-  // Hacky way to load private variables
-  // into the web interface class. Solution based on:
+  // A way to load private variables
+  // into the web interface class. 
+  // Solution based on:
   // https://github.com/vibe-d/vibe.d/issues/2438
   @anyAuth
   void LoadBackend() {
-    m_backend = SetupSafepineCoreBackend(m_cachePath);
-    m_portfolio = new Engine();
-    m_benchmark = new Engine();
+    m_portfolio = new Engine!(driver.mysql)(m_cachePath);
+    m_benchmark = new Engine!(driver.mysql)(m_cachePath);
 
     // Algorithms
     Discretionary(
       m_portfolio,
       m_profile.initialDeposit,
-      m_profile.dataBegin,
-      m_profile.dataEnd,
-      m_profile.assetNames,
-      m_profile.assetRatios,
-      m_profile.assetDates,
+      m_profile.beginDate,
+      m_profile.endDate,
+      m_profile.scheduleItemNames,
+      m_profile.scheduleItemRatios,
+      m_profile.scheduleItemDates,
       m_profile.scheduleType);
     BuyAndHold(
       m_benchmark,
       m_profile.initialDeposit,
-      m_profile.dataBegin,
-      m_profile.dataEnd,
+      m_profile.beginDate,
+      m_profile.endDate,
       ["SPY"],
       new Matrix([1.0]));
   }
@@ -190,9 +217,8 @@ class PortfolioInterface
   }
 
 private:
-  sdf                    m_backend = null;
-  string                 m_cachePath = "";
-  Engine                 m_portfolio = null;
-  Engine                 m_benchmark = null;
-  AssetAllocationProfile m_profile;
+  string                m_cachePath = "";
+  Engine!(driver.mysql) m_portfolio = null;
+  Engine!(driver.mysql) m_benchmark = null;
+  ConfigurationProfile  m_profile;
 }

@@ -5,12 +5,13 @@ import std.datetime.date: Date;
 import std.stdio;
 
 // Safepine
+import safepine_core.backend.sqlinterface;
 import safepine_core.quantum.engine;
 import safepine_core.math.matrix;
 import safepine_core.math.optimization: PortfolioAllocation;
 
 void Discretionary (
-  Engine engine_IN,
+  Engine!(driver.mysql) engine_IN,
   double initial_deposit_IN,
   Date start_date_IN,
   Date end_date_IN,
@@ -34,13 +35,13 @@ void Discretionary (
   ulong asset_dates_length = asset_dates_IN.length;
   for(ulong asset_date_index = 0; asset_date_index < asset_dates_IN.length; ++asset_date_index)
   {
-    while(engine_IN.GetCurrentDate() < asset_dates_IN[asset_date_index]) 
+    while(engine_IN.CurrentDate() < asset_dates_IN[asset_date_index]) 
       { engine_IN.IncrementDate(); }
     if(scheduleType_IN == "ratio") {
       engine_IN.SellEverything!(safepine_core.quantum.engine.logger.off);
       double[] assets_prices_unit = engine_IN.GetPrice(
         asset_names_IN[asset_date_index],
-        engine_IN.GetCurrentDate());
+        engine_IN.CurrentDate());
       Matrix asset_prices_unit_m = new Matrix(assets_prices_unit);
       Matrix portfolio_allocation = PortfolioAllocation!(safepine_core.math.optimization.logger.off)
       (
@@ -71,7 +72,7 @@ void Discretionary (
   }
 
   // Handles the delta between portfolio end date, and final date in the input list.
-  while(engine_IN.GetCurrentDate() < end_date_IN)
+  while(engine_IN.CurrentDate() < end_date_IN)
     { engine_IN.IncrementDate(); }
 
   writeln("[ALGORITHMS: Discretionary] Timing: "~to!string((to!double(myStopWatch.peek.total!"usecs")*0.001))~" ms");
@@ -80,7 +81,7 @@ void Discretionary (
 }
 
 void Rebalance (
-  Engine engine_IN,
+  Engine!(driver.mysql) engine_IN,
   double initial_deposit_IN,
   Date start_date_IN,
   Date end_date_IN,
@@ -107,7 +108,7 @@ void Rebalance (
 
   // Nothing to rebalance, hold cash only
   if(asset_names_IN.length == 0) {
-    while(engine_IN.GetCurrentDate() < end_date_IN) {    
+    while(engine_IN.CurrentDate() < end_date_IN) {    
       engine_IN.IncrementDate();
       ++trade_day_counter;
     } 
@@ -116,7 +117,7 @@ void Rebalance (
 
   double[] assets_prices_unit = engine_IN.GetPrice(
     asset_names_IN,
-    engine_IN.GetCurrentDate(),
+    engine_IN.CurrentDate(),
     connectionID_IN);
 
   Matrix asset_prices_unit_m = new Matrix(assets_prices_unit);
@@ -134,7 +135,7 @@ void Rebalance (
     portfolio_allocation.toInt_v, 
     connectionID_IN);
 
-  while(engine_IN.GetCurrentDate() < end_date_IN) {    
+  while(engine_IN.CurrentDate() < end_date_IN) {    
     engine_IN.IncrementDate(connectionID_IN);
 
       if(rebalance_day_IN == trade_day_counter) {
@@ -145,7 +146,7 @@ void Rebalance (
           // Get rebalanced equity numbers
           assets_prices_unit = engine_IN.GetPrice(
             asset_names_IN,
-            engine_IN.GetCurrentDate(),
+            engine_IN.CurrentDate(),
             connectionID_IN);
           asset_prices_unit_m = assets_prices_unit;
           portfolio_allocation = PortfolioAllocation!(safepine_core.math.optimization.logger.off)
@@ -176,7 +177,7 @@ void Rebalance (
 }
 
 void BuyAndHold(
-  Engine engine_IN,
+  Engine!(driver.mysql) engine_IN,
   double initial_deposit_IN,
   Date start_date_IN,
   Date end_date_IN,
@@ -192,7 +193,7 @@ void BuyAndHold(
 
   double[] assets_prices_unit = engine_IN.GetPrice(
     asset_names_IN,
-    engine_IN.GetCurrentDate());
+    engine_IN.CurrentDate());
 
   Matrix asset_prices_unit_m = new Matrix(assets_prices_unit);
 
@@ -209,7 +210,7 @@ void BuyAndHold(
     portfolio_allocation.toInt_v);    
 
   int trade_day_counter = 0;     
-  while(engine_IN.GetCurrentDate() < end_date_IN) {    
+  while(engine_IN.CurrentDate() < end_date_IN) {    
       engine_IN.IncrementDate();
       ++trade_day_counter;
   }  

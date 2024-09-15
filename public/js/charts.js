@@ -6,6 +6,7 @@ class Charts extends React.Component
 
     // Class Variables
     this.prices_ALL = [];
+    this.pricesFiltered_ALL = [];
     this.dates_ALL = [];
     this.symbols_ALL = [];
     this.windowSize = 0;

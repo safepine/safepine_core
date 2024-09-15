@@ -1,5 +1,6 @@
 module safepine_core.pipelines.publicaccess;
 
+// D
 import std.net.curl;
 import std.csv: csvReader;
 import std.datetime;
@@ -8,6 +9,9 @@ import std.conv;
 import std.algorithm;
 import std.json;
 
+// Safepine
+import safepine_core.quantum.frame;
+
 enum output {frame, csv}
 enum logger {on, off}
 enum intervals {daily = "1d", weekly = "1wk", monthly = "1mo"}
@@ -15,36 +19,6 @@ enum intervals {daily = "1d", weekly = "1wk", monthly = "1mo"}
 struct PublicAccessPoint
 {
   string[5] profile;
-}
-
-struct Frame
-{
-  string name;
-  Price price;
-  Dividend div;
-  Split split;
-  Date date;
-}
-
-struct Price
-{
-  double adjclose;
-  double close;
-  double high;
-  double low;
-  double open;
-  long volume;
-}
-
-struct Dividend
-{
-  double amount;
-} 
-
-struct Split
-{
-  long denominator;
-  long numerator;
 }
 
 // CSV Readers
@@ -69,90 +43,6 @@ struct Dividend_csvReader
 {
   string date;
   string amount;
-}
-
-Frame[][] NormalizeFrameDates(Frame[] benchmark, Frame[][] lists)
-{
-  Frame[][] result;
-  Frame[] element = lists[0];
-  bool[] doesDateExistsForAll;
-  bool addDate;
-  Date[] normalized_dates;
-
-  // Get all dates in benchmark
-  // Find all common dates in lists
-  for(int i = 0; i < benchmark.length; ++i)
-  {
-    addDate = true;
-    for(int n = 0; n < lists.length; ++n) doesDateExistsForAll ~= false;
-    for(int j = 0; j < lists.length; ++j)
-    {
-      for(int k = 0; k < lists[j].length; ++k)
-      {
-        if(benchmark[i].date == lists[j][k].date)
-          doesDateExistsForAll[j] = true;
-      }
-    }
-    for(int n = 0; n < lists.length; ++n)
-    {
-      if(doesDateExistsForAll[n] == false) addDate = false;
-    }
-    if(addDate)
-    {
-      normalized_dates ~= benchmark[i].date;
-    }
-  }
-
-  // Add benchmark's normalized frames to result
-  Frame[] normalized_benchmark;
-  int i_n = 0;
-  for(int i = 0; i < benchmark.length; ++i)
-  {
-    if(normalized_dates[i_n] == benchmark[i].date)
-    {
-      normalized_benchmark ~= benchmark[i];
-      i_n += 1;
-    }
-  }
-  result ~= normalized_benchmark;
-
-  // Add normalized frames of lists to result
-  for(int k = 0; k < lists.length; ++k)
-  {
-    Frame[] normalized_list_item;
-    i_n = 0;
-
-    for(int i = 0; i < lists[k].length; ++i)
-    {
-      if(i_n < normalized_dates.length)
-      {
-        if(normalized_dates[i_n] <= lists[k][i].date)
-        {
-          normalized_list_item ~= lists[k][i];
-          i_n += 1;
-        } 
-      }
-    }
-    result ~= normalized_list_item;
-  }
-
-  return result;
-}
-
-void PrintFrame(Frame[] frame_IN)
-{
-  import std.stdio: writeln;
-
-  // Weird break
-  writeln();
-  writeln("-----::-----::-----::-----::");
-  writeln("-----::-----::-----::-----::");
-  writeln("Length of " ~ frame_IN[0].name ~ " is " ~  to!string(frame_IN.length));
-  writeln("Open, high, low, close, volume");
-  for(int j = 0; j < frame_IN.length; ++j)
-  {
-    writeln(to!string(frame_IN[j].date) ~ ": "~ to!string(frame_IN[j].price.open) ~ ", ", to!string(frame_IN[j].price.high) ~ ", " ~to!string(frame_IN[j].price.low) ~ ", " ~ to!string(frame_IN[j].price.close) ~ ", " ~ to!string(frame_IN[j].price.volume));
-  }
 }
 
 struct Public
